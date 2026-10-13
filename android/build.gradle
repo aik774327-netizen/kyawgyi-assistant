@@ -1,0 +1,3 @@
+// Root build file — module configuration lives in app/build.gradle.
+// Requires the Flutter SDK (flutter.sdk in local.properties or FLUTTER_SDK env).
+// Compile status: NOT VERIFIED (no JDK/Android SDK/Flutter SDK in this environment).

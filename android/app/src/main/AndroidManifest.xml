@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Package visibility (API 30+): openApp() resolves these via
+         getLaunchIntentForPackage(); without this block they return null. -->
+    <queries>
+        <package android:name="com.android.dialer" />
+        <package android:name="com.google.android.apps.messaging" />
+        <package android:name="com.android.camera" />
+        <package android:name="com.google.android.apps.photos" />
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.android.settings" />
+        <package android:name="com.google.android.calendar" />
+        <package android:name="com.google.android.deskclock" />
+    </queries>
+
+    <!-- ============ Permissions ============ -->
+    <!-- Microphone foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- FIX: microphone capture needs RECORD_AUDIO (was missing) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- FIX: VoiceForegroundService uses a PARTIAL_WAKE_LOCK (was missing) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- FIX: Android 13+ needs this for the persistent FGS notification (was missing) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Wi-Fi state (pre-Q direct toggle; Q+ uses Settings Panel) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <!-- Flutter v2 embedding marker (required by the Flutter tool) -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground Service: microphone type declared here -->
+        <service
+            android:name=".service.VoiceForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Accessibility Service (D5 High Risk: user must enable manually;
+             BIND_ACCESSIBILITY_SERVICE is a signature permission, declared on
+             the service — NOT as <uses-permission>) -->
+        <service
+            android:name=".service.KyawGyiAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+    </application>
+
+</manifest>
