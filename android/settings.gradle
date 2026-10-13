@@ -12,6 +12,9 @@ pluginManagement {
         if (!sdkPath) {
             sdkPath = System.getenv("FLUTTER_SDK")?.trim()
         }
+        if (!sdkPath) {
+            sdkPath = System.getenv("FLUTTER_ROOT")?.trim()
+        }
         assert sdkPath, "Flutter SDK not found: set flutter.sdk in local.properties or the FLUTTER_SDK env var"
         return sdkPath
     }()
