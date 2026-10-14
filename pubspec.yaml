@@ -11,6 +11,10 @@ dependencies:
     sdk: flutter
   # Runtime permission requests (RECORD_AUDIO before startStt).
   permission_handler: ^11.3.1
+  # Gemini API voice assistant (Myanmar STT/TTS/chat).
+  http: ^1.2.0
+  flutter_secure_storage: ^9.2.2
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:

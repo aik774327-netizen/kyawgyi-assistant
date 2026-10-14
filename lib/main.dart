@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'native/kyawgyi_bridge.dart';
+import 'gemini/voice_assistant_screen.dart';
 
 /// Minimal Flutter shell for the KyawGyi native bridge.
 ///
@@ -163,6 +164,13 @@ class _HomePageState extends State<HomePage> {
                   child: const Text('Read screen')),
               ElevatedButton(
                   onPressed: _refresh, child: const Text('Refresh state')),
+              ElevatedButton(
+                  onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const VoiceAssistantScreen(),
+                        ),
+                      ),
+                  child: const Text('🎙️ Gemini မြန်မာအသံ')),
             ],
           ),
           const Divider(height: 32),

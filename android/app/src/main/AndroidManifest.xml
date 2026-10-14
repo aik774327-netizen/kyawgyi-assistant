@@ -25,6 +25,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- FIX: Android 13+ needs this for the persistent FGS notification (was missing) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Gemini API (STT/TTS/chat) needs network access -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Wi-Fi state (pre-Q direct toggle; Q+ uses Settings Panel) -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />

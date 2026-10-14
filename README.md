@@ -1,27 +1,39 @@
-# AI Angle / KyawGyi — Fix Pack
+# KyawGyi Assistant — Flutter + Gemini Myanmar Voice
 
-Remediation + completion pack for the **AI Angle** web assistant (TanStack Start)
-and the **KyawGyi** Android native bridge. All files are drop-in replacements /
-additions for the host project.
+**KyawGyi** Android voice assistant: Flutter shell over the native bridge,
+with full Myanmar voice powered directly by the Google Gemini API
+(STT → chat → TTS, all in Burmese). The user's own Gemini API key is stored
+securely on-device (Android Keystore) and verified in-app with a
+"စစ်ဆေးရန်" button before saving.
+
+> 2026-10-15: the legacy `src/` TanStack web assistant (Lovable gateway) and
+> its `tests/` were removed — unused by the APK. Voice now runs 100% on the
+> Gemini API from the Flutter app. Model IDs verified 2026-10-15 via web
+> research (see `lib/gemini/gemini_config.dart`).
 
 ## Layout
 
 ```
-src/
-  lib/
-    memory.ts      # Token-safe long-term memory (immutable, localStorage)
-    gateway.ts     # Shared server helpers: BYOK key, errors, rate limiting
-  routes/api/
-    angle-chat.ts      # Chat (SSE -> plain text) via Lovable AI Gateway
-    angle-voice.ts     # TTS (JSON->audio) + STT (multipart->{text})
-    angle-validate.ts  # API-key validation (GET /v1/models, no credits)
-  components/
-    AiAngleChat.tsx     # Chat UI: voice, images, memory panel, key settings
-android/               # Native Android module (see below)
 lib/
-  main.dart                  # Minimal Flutter shell (demo UI over the bridge)
+  main.dart                  # Flutter shell (demo UI over the bridge)
   native/kyawgyi_bridge.dart # Dart MethodChannel + EventChannel wrapper
+  gemini/
+    gemini_config.dart       # Verified API endpoints + model IDs
+    api_key_manager.dart     # Secure on-device key storage (Keystore)
+    gemini_service.dart      # Key validation, STT, chat, TTS, WAV utils
+    voice_assistant_screen.dart  # Burmese UI: key entry/verify + voice chat
+android/               # Native Android module (mic FGS, accessibility, etc.)
 ```
+
+## Gemini API key
+
+The app needs the user's own Gemini API key:
+1. Get one at Google AI Studio (aistudio.google.com) → Get API Key.
+2. In the app: open "🎙️ Gemini မြန်မာအသံ" → paste the key → "စစ်ဆေးရန်".
+3. After "✓ API Key မှန်ကန်ပါသည်", tap "သိမ်းရန်".
+
+The key never leaves the device except in HTTPS calls to
+`generativelanguage.googleapis.com`, and is never logged.
 
 ## Web setup
 
