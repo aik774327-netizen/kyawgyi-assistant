@@ -1,0 +1,12 @@
+{
+  "name": "Kyaw Gyi",
+  "version": "1.0.0",
+  "description": "Kyaw Gyi (ကျော်ကြီး) - Myanmar Voice Assistant, EcoFlow Smart Controller & KENNEDE KN-5996HRB IR Smart Remote",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

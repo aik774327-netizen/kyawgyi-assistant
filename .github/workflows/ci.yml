@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, 'feature/**' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install deps
+        run: npm ci
+      - name: TypeScript build & lint
+        run: |
+          npm run lint
+          npm run build
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        node: [18]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install
+        run: npm ci
+      - name: Run unit tests (simulator mode)
+        env:
+          SIMULATOR: 'true'
+        run: npm test -- --runInBand
+
+  integration-sim:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Start simulator via docker-compose
+        run: |
+          docker-compose -f docker-compose.simulator.yml up -d
+      - name: Install
+        run: npm ci
+      - name: Run integration tests
+        env:
+          SIMULATOR: 'true'
+        run: npm test -- --runInBand --testPathPattern=services/__tests__|tests

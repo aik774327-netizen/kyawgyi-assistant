@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  mock-ecoflow:
+    image: alpine
+    command: ["sh", "-c", "while true; do sleep 3600; done"]
+
+# Note: For CI, our TypeScript stubs use in-process simulation (SIMULATOR=true).

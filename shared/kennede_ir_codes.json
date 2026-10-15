@@ -1,0 +1,57 @@
+{
+  "device": "KENNEDE KN-5996HRB",
+  "carrierFrequency": 38000,
+  "carrier_frequency_assumed": 38000,
+  "buttons": {
+    "power": {
+      "captured": false,
+      "protocol": null,
+      "address": null,
+      "command": null,
+      "rawData": null,
+      "bits": null,
+      "rawTiming": [],
+      "repeatCount": 0
+    },
+    "light": {
+      "captured": false,
+      "protocol": null,
+      "address": null,
+      "command": null,
+      "rawData": null,
+      "bits": null,
+      "rawTiming": [],
+      "repeatCount": 0
+    },
+    "speed": {
+      "captured": false,
+      "protocol": null,
+      "address": null,
+      "command": null,
+      "rawData": null,
+      "bits": null,
+      "rawTiming": [],
+      "repeatCount": 0
+    },
+    "oscillation": {
+      "captured": false,
+      "protocol": null,
+      "address": null,
+      "command": null,
+      "rawData": null,
+      "bits": null,
+      "rawTiming": [],
+      "repeatCount": 0
+    },
+    "center": {
+      "captured": false,
+      "protocol": null,
+      "address": null,
+      "command": null,
+      "rawData": null,
+      "bits": null,
+      "rawTiming": [],
+      "repeatCount": 0
+    }
+  }
+}

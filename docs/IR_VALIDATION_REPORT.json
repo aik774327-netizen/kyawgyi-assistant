@@ -1,0 +1,111 @@
+{
+  "timestamp": "2026-09-20T06:03:00Z",
+  "project": "Kyaw Gyi (ကျော်ကြီး)",
+  "build_status": {
+    "compile_applet": "VERIFIED",
+    "gradle_assemble_debug": "VERIFIED",
+    "apk_path": "app/build/outputs/apk/debug/app-debug.apk",
+    "apk_size_bytes": 25076515,
+    "apk_sha256": "99a6cf045ca729839c49550a9563308daaa70c21e0862c365690d7fb9a6c24cf"
+  },
+  "test_status": {
+    "android_unit_tests": {
+      "command": "gradle :app:testDebugUnitTest",
+      "status": "VERIFIED",
+      "actionable_tasks": 33,
+      "failed_tests": 0
+    },
+    "android_lint": {
+      "command": "gradle :app:lintDebug",
+      "status": "VERIFIED",
+      "errors": 0,
+      "warnings_handled": true
+    },
+    "node_gateway_tests": {
+      "command": "npm test",
+      "status": "VERIFIED",
+      "total_tests": 80,
+      "passed_tests": 80,
+      "failed_tests": 0
+    }
+  },
+  "subsystem_preservation": {
+    "myanmar_voice_control": "VERIFIED",
+    "speech_to_text": "VERIFIED",
+    "text_to_speech": "VERIFIED",
+    "wake_word_detector": "VERIFIED",
+    "offline_voice_fallback": "VERIFIED",
+    "kennede_ir_remote": "VERIFIED",
+    "ecoflow_integration": "VERIFIED",
+    "ai_angel": "VERIFIED",
+    "studio": "VERIFIED",
+    "shortcuts": "VERIFIED",
+    "integrity_engine": "VERIFIED",
+    "room_database": "VERIFIED",
+    "esp32_integration": "VERIFIED"
+  },
+  "physical_evidence_chain": {
+    "POWER": {
+      "state": "NOT_TESTED",
+      "learning": "NOT_TESTED",
+      "transmission": "NOT_TESTED",
+      "acknowledged": "NOT_TESTED",
+      "optical_verified": "NOT_TESTED",
+      "appliance_verified": "NOT_TESTED",
+      "status": "NOT VERIFIED",
+      "reason": "Physical ESP32 board and KENNEDE KN-5996HRB remote are not connected to this cloud container."
+    },
+    "LIGHT": {
+      "state": "NOT_TESTED",
+      "learning": "NOT_TESTED",
+      "transmission": "NOT_TESTED",
+      "acknowledged": "NOT_TESTED",
+      "optical_verified": "NOT_TESTED",
+      "appliance_verified": "NOT_TESTED",
+      "status": "NOT VERIFIED",
+      "reason": "Physical ESP32 board and KENNEDE KN-5996HRB remote are not connected to this cloud container."
+    },
+    "SPEED": {
+      "state": "NOT_TESTED",
+      "learning": "NOT_TESTED",
+      "transmission": "NOT_TESTED",
+      "acknowledged": "NOT_TESTED",
+      "optical_verified": "NOT_TESTED",
+      "appliance_verified": "NOT_TESTED",
+      "status": "NOT VERIFIED",
+      "reason": "Physical ESP32 board and KENNEDE KN-5996HRB remote are not connected to this cloud container."
+    },
+    "OSCILLATION": {
+      "state": "NOT_TESTED",
+      "learning": "NOT_TESTED",
+      "transmission": "NOT_TESTED",
+      "acknowledged": "NOT_TESTED",
+      "optical_verified": "NOT_TESTED",
+      "appliance_verified": "NOT_TESTED",
+      "status": "NOT VERIFIED",
+      "reason": "Physical ESP32 board and KENNEDE KN-5996HRB remote are not connected to this cloud container."
+    },
+    "CENTER": {
+      "state": "NOT_TESTED",
+      "learning": "NOT_TESTED",
+      "transmission": "NOT_TESTED",
+      "acknowledged": "NOT_TESTED",
+      "optical_verified": "NOT_TESTED",
+      "appliance_verified": "NOT_TESTED",
+      "status": "NOT VERIFIED",
+      "reason": "Physical ESP32 board and KENNEDE KN-5996HRB remote are not connected to this cloud container."
+    }
+  },
+  "error_learning_engine_discipline": {
+    "repeat_failure_guard": "VERIFIED",
+    "burmese_warning": "ယခင်က မအောင်မြင်ခဲ့သော လုပ်ဆောင်ချက် ဖြစ်ပါသည်",
+    "alternative_action_routing": "VERIFIED",
+    "failure_categories_tracked": [
+      "NETWORK",
+      "HARDWARE",
+      "AUTHENTICATION",
+      "TECHNICAL",
+      "TIMEOUT"
+    ]
+  }
+}

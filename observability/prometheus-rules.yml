@@ -1,0 +1,29 @@
+groups:
+  - name: ecoflow-alerts
+    rules:
+      - alert: GeminiQuotaExhausted
+        expr: gemini_errors_total > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gemini error spike detected"
+          description: "More than 5 Gemini errors in the last minute; circuit-breaker might be active."
+
+      - alert: EcoflowAckTimeout
+        expr: ecoflow_command_ack_timeout_total > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EcoFlow command ack timeouts detected"
+          description: "Commands not receiving ACKs for >5s. Check cloud connectivity."
+
+      - alert: BLEPermissionSpike
+        expr: ble_permission_denied_total > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BLE permission denied spike"
+          description: "Large number of users denied BLE permission; may indicate iframe or UX issue."

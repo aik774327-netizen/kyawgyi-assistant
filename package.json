@@ -1,0 +1,12 @@
+{
+  "name": "kyaw-gyi",
+  "version": "1.0.0",
+  "description": "Kyaw Gyi (ကျော်ကြီး) - Myanmar Voice Assistant gateway, NLU and simulator tooling",
+  "type": "module",
+  "scripts": {
+    "test": "node test-runner.mjs",
+    "lint": "node --check test-runner.mjs src/services/*.ts src/nlu/*.ts src/router/*.ts src/core/*.ts src/storage/*.ts"
+  },
+  "author": "Kyaw Gyi",
+  "license": "UNLICENSED"
+}
