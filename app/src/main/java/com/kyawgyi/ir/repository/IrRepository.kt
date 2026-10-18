@@ -8,7 +8,7 @@ package com.kyawgyi.ir.repository
  * This repository interface defines the ESP32-backed IR contract and is retained because
  * it is covered by `RealWorldMismatchTest` (honest no-hallucination behavior when no
  * IR hardware is present). The duplicate UI screens that once consumed it
- * (com/kyawgyi/ir/ui/*, com/example/ui/screens/* IR screens) were dead and removed.
+ * (dead screens under com.kyawgyi.ir.ui and com.example.ui.screens) were removed.
  */
 import com.kyawgyi.ir.models.Esp32StatusResponse
 import com.kyawgyi.ir.models.GenericApiResponse
