@@ -28,7 +28,7 @@ import org.robolectric.annotation.Config
  * Diagnostic Logging, and Web Bridge DTOs.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class SystemPermissionsTest {
 
   @Before

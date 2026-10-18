@@ -15,8 +15,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.IOException
 
+/**
+ * Uses Robolectric (sdk 34) so android.util.Log calls inside ApiKeyValidator
+ * don't crash on the local JVM.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ApiKeyValidatorTest {
 
   /**

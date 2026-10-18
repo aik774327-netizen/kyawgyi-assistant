@@ -149,8 +149,8 @@ class RealP0ShipBlockerUnitTest {
     val rawSecret = "AIzaSyD_Secret_Key_For_AiStudio_9981"
     val masked = ApiKeyValidator.maskKey(rawSecret)
 
-    // Assert secret is properly masked for UI display
-    assertEquals("AIzaSy...9981", masked)
+    // Assert secret is properly masked for UI display (•••• + last 4 only)
+    assertEquals("••••9981", masked)
     assertFalse("Masked key must not reveal middle secret", masked.contains("Secret_Key"))
 
     // Serialize pure ManagedApiKey model

@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config
  * (၂) (Runtime Permissions, Battery Optimization Exemption & OEM Autostart Guidance)
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class RuntimePermissionsAndOemTest {
 
   private val context: Context

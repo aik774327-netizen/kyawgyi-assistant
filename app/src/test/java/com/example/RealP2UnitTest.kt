@@ -29,7 +29,7 @@ import org.robolectric.annotation.Config
  * D13: Sensitive permissions rationales and degraded fallbacks for all 5 permissions.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class RealP2UnitTest {
 
   // =========================================================================

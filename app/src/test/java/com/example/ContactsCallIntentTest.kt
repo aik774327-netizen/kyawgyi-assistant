@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
  * 3. Prevention of simulated numbers; proper Real-World Mismatch detection when contact is missing.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class ContactsCallIntentTest {
 
   @Test
