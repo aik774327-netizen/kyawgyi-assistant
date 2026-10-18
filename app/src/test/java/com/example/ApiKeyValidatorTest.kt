@@ -4,11 +4,13 @@ import com.kyawgyi.ir.apikey.ApiKeyValidationResult
 import com.kyawgyi.ir.apikey.ApiKeyValidator
 import kotlinx.coroutines.runBlocking
 import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Timeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,6 +18,35 @@ import org.junit.Test
 import java.io.IOException
 
 class ApiKeyValidatorTest {
+
+  /**
+   * Hand-written fake for okhttp3.Call — no Mockito dependency needed.
+   */
+  private class FakeCall(
+    private val req: Request,
+    private val statusCode: Int,
+    private val responseBody: String,
+    private val shouldThrow: Boolean
+  ) : Call {
+    override fun request(): Request = req
+    override fun execute(): Response {
+      if (shouldThrow) throw IOException("Simulated network connection timeout")
+      return Response.Builder()
+        .request(req)
+        .protocol(Protocol.HTTP_1_1)
+        .code(statusCode)
+        .message(if (statusCode == 200) "OK" else "Error")
+        .body(responseBody.toResponseBody("application/json".toMediaType()))
+        .build()
+    }
+    override fun enqueue(responseCallback: Callback): Unit =
+      throw UnsupportedOperationException("FakeCall is synchronous-only")
+    override fun cancel() {}
+    override fun isExecuted(): Boolean = false
+    override fun isCanceled(): Boolean = false
+    override fun timeout(): Timeout = Timeout.NONE
+    override fun clone(): Call = FakeCall(req, statusCode, responseBody, shouldThrow)
+  }
 
   private fun createMockCallFactory(
     statusCode: Int = 200,
@@ -25,24 +56,7 @@ class ApiKeyValidatorTest {
   ): Call.Factory {
     return Call.Factory { request ->
       onCallMade?.invoke(request)
-      val mockCall = org.mockito.Mockito.mock(Call::class.java)
-
-      if (shouldThrowNetworkError) {
-        org.mockito.Mockito.`when`(mockCall.execute()).thenAnswer {
-          throw IOException("Simulated network connection timeout")
-        }
-      } else {
-        val response = Response.Builder()
-          .request(request)
-          .protocol(Protocol.HTTP_1_1)
-          .code(statusCode)
-          .message(if (statusCode == 200) "OK" else "Error")
-          .body(responseBody.toResponseBody("application/json".toMediaType()))
-          .build()
-        org.mockito.Mockito.`when`(mockCall.execute()).thenReturn(response)
-      }
-
-      mockCall
+      FakeCall(request, statusCode, responseBody, shouldThrowNetworkError)
     }
   }
 
