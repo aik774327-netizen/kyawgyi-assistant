@@ -24,7 +24,7 @@ data class VoiceActivityEvent(
 )
 
 /**
- * Voice-Activity & Energy Trigger (AudioRecordWakeWordDetector).
+ * Voice-Activity & Energy Trigger (AudioRecordVoiceActivityDetector).
  *
  * HONEST RELABEL & ARCHITECTURE DOCUMENTATION:
  * This class is a voice-activity/energy detector (VAD) and heuristic acoustic-envelope trigger,
@@ -39,7 +39,7 @@ data class VoiceActivityEvent(
  *
  * Note: Phoneme matching is NOT performed; thresholds are tuned conservatively to avoid over-triggering.
  */
-class AudioRecordWakeWordDetector(
+class AudioRecordVoiceActivityDetector(
   private val context: Context,
   private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
 ) {

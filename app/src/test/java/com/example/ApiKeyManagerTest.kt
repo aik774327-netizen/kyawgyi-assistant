@@ -126,6 +126,16 @@ class ApiKeyManagerTest {
   }
 
   @Test
+  fun testPlaceholderKeysAreRejected() {
+    // .env.example placeholder baked into BuildConfig must never be treated as a genuine key (R1)
+    assertTrue(ApiKeyManager.isPlaceholderKey("YOUR_API_KEY"))
+    assertTrue(ApiKeyManager.isPlaceholderKey("MY_GEMINI_API_KEY"))
+    assertTrue(ApiKeyManager.isPlaceholderKey("  "))
+    assertTrue(ApiKeyManager.isPlaceholderKey("AIzaSyDefaultFreeKeyPrimary9981"))
+    assertFalse(ApiKeyManager.isPlaceholderKey("AIzaSyUserKeyReal9999"))
+  }
+
+  @Test
   fun testApiKeyInterceptorAttachesKey() {
     val interceptor = ApiKeyInterceptor(apiKeyManager, headerName = "X-TEST-API-KEY")
     apiKeyManager.addApiKey("User Key", "AIzaSyUserKeyReal9999", ApiKeyTier.FREE_TIER)

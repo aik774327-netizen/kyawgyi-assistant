@@ -17,7 +17,7 @@ flowchart TD
 
   subgraph L3[3. Voice & Speech Pipeline]
     AudioRecord[AudioRecord PCM 16kHz]
-    WakeWord[AudioRecordWakeWordDetector + Clipping-Guarded Gain]
+    WakeWord[AudioRecordVoiceActivityDetector + Clipping-Guarded Gain]
     LocalTTS[Myanmar Phonetics Android TTS]
     CloudSTT[Gemini Live / Whisper Online Fallback]
   end
@@ -61,7 +61,7 @@ flowchart TD
 - **Burmese Feedback**: Once dispatched, the user receives affirmative Burmese audio and UI feedback: `"ဖုန်းခေါ်ဆိုရန် ဖုန်းခေါ်စနစ် ဖွင့်လှစ်ပြီးပါပြီ"`.
 
 ### Audio Signal Processing (Clipping-Guarded Normalization)
-- **Pre-Amp Gain**: Audio frames in `AudioRecordWakeWordDetector` apply a +6dB (+2.0f) gain normalization.
+- **Pre-Amp Gain**: Audio frames in `AudioRecordVoiceActivityDetector` apply a +6dB (+2.0f) gain normalization.
 - **Clamping**: Every sample is strictly bounded within `[Short.MIN_VALUE, Short.MAX_VALUE]` using `coerceIn` prior to integer conversion, preventing digital arithmetic overflow and audio clipping distortion.
 
 ### Sensitive Permission Architecture & Graceful Fallbacks

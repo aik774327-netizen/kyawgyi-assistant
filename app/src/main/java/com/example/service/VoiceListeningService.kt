@@ -25,7 +25,7 @@ class VoiceListeningService : Service() {
 
   private var wakeLock: PowerManager.WakeLock? = null
   private var audioSensor: AdaptiveAudioSensor? = null
-  private var wakeWordDetector: AudioRecordWakeWordDetector? = null
+  private var voiceActivityDetector: AudioRecordVoiceActivityDetector? = null
   private val serviceJob = Job()
   private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
   private var explicitlyStoppedByUser = false
@@ -114,13 +114,13 @@ class VoiceListeningService : Service() {
     }
 
     audioSensor?.startSensing()
-    wakeWordDetector?.startContinuousListening()
+    voiceActivityDetector?.startContinuousListening()
     _isServiceRunning.value = true
   }
 
   private fun stopForegroundListening() {
     audioSensor?.stopSensing()
-    wakeWordDetector?.stopContinuousListening()
+    voiceActivityDetector?.stopContinuousListening()
     _isServiceRunning.value = false
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
       stopForeground(STOP_FOREGROUND_REMOVE)
@@ -141,7 +141,7 @@ class VoiceListeningService : Service() {
       }
     }
 
-    wakeWordDetector = AudioRecordWakeWordDetector(this, serviceScope).apply {
+    voiceActivityDetector = AudioRecordVoiceActivityDetector(this, serviceScope).apply {
       onVoiceActivityDetected = { keyword, confidence ->
         // Continuous voice-activity / energy detection triggered hands-free interaction
         _backgroundSpeechDetected.value = "VOICE_ACTIVITY_DETECTED: $keyword (Confidence: ${"%.2f".format(confidence)})"

@@ -121,7 +121,7 @@ fun MainScreen(
   // Start continuous audio stream listener for wake word when mic permission is granted
   androidx.compose.runtime.LaunchedEffect(permissionHandler.permissionState.isMicrophoneGranted) {
     if (permissionHandler.permissionState.isMicrophoneGranted) {
-      viewModel.wakeWordDetector.startContinuousListening()
+      viewModel.voiceActivityDetector.startContinuousListening()
     }
   }
 

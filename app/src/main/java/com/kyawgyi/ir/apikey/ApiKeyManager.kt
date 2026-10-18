@@ -84,6 +84,7 @@ class ApiKeyManager private constructor(context: Context) {
       val trimmed = secret.trim()
       return trimmed.isBlank() ||
              trimmed == "MY_GEMINI_API_KEY" ||
+             trimmed == "YOUR_API_KEY" ||
              trimmed.startsWith("AIzaSyDefaultFreeKey") ||
              trimmed.startsWith("AIzaSyBackupFreeTierKey") ||
              trimmed.startsWith("AIzaSyEnterpriseProKey")

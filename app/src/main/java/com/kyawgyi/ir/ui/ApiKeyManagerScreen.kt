@@ -1010,6 +1010,16 @@ private fun AddApiKeyDialog(
           )
         }
 
+        // R3: explain why save is disabled until the key passes live validation
+        if (validationResult !is ApiKeyValidationResult.Success) {
+          Text(
+            text = "သိမ်းဆည်းရန် \"စစ်ဆေးရန်\" ကို အရင်နှိပ်ပြီး သော့မှန်ကန်ကြောင်း အတည်ပြုပါ။",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp)
+          )
+        }
+
         Text("Tier အမျိုးအစား:", style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           ApiKeyTier.entries.forEach { tier ->
@@ -1034,11 +1044,14 @@ private fun AddApiKeyDialog(
       Button(
         onClick = {
           val quota = maxQuotaText.toIntOrNull() ?: 1000
-          if (label.isNotBlank() && rawKey.isNotBlank()) {
+          if (label.isNotBlank() && rawKey.isNotBlank() &&
+              validationResult is ApiKeyValidationResult.Success) {
             onConfirm(label.trim(), rawKey.trim(), selectedTier, quota, false)
           }
         },
-        enabled = label.isNotBlank() && rawKey.isNotBlank()
+        // R3: save is only allowed after the key passes live validation (စစ်ဆေးရန်)
+        enabled = label.isNotBlank() && rawKey.isNotBlank() &&
+                  validationResult is ApiKeyValidationResult.Success
       ) {
         Text("လုံခြုံစွာ သိမ်းမည်")
       }

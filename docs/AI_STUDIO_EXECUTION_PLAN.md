@@ -8,7 +8,7 @@
 
 ## Phase 2: System Architecture & Subsystem Preservation
 - [x] **Voice Control Subsystem**:
-  - `AudioRecordWakeWordDetector.kt`: Low-power audio buffering and amplitude/spectral trigger.
+  - `AudioRecordVoiceActivityDetector.kt`: Low-power audio buffering and amplitude/spectral trigger.
   - `MyanmarSttManager.kt` & `MyanmarTtsEngine.kt`: Multi-engine translation and fallback.
   - `OfflineVoiceFallbackTest.kt`: Unit test verification.
 - [x] **KENNEDE IR Controller Subsystem**:

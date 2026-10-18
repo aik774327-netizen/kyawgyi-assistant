@@ -52,7 +52,7 @@ import com.example.realworld.RealEsp32IrClient
 import com.example.realworld.RealHardwareBridge
 import com.example.realworld.RealLocationManager
 import com.example.realworld.SettingsNavigationHelper
-import com.example.service.AudioRecordWakeWordDetector
+import com.example.service.AudioRecordVoiceActivityDetector
 import com.example.service.ErrorLearningEngine
 import com.example.service.MyanmarSttManager
 import com.example.service.MyanmarTtsEngine
@@ -107,7 +107,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   // Notification Management & Audio Stream Wake Word Detection
   val notificationHelper = NotificationManagementHelper.getInstance(application)
-  val wakeWordDetector = AudioRecordWakeWordDetector(application, viewModelScope)
+  val voiceActivityDetector = AudioRecordVoiceActivityDetector(application, viewModelScope)
   val ecoFlowEmergencyEngine = EcoFlowEmergencyEngine(application, errorLearningEngine, notificationHelper, realActionExecutor)
   val kennedeAutomationEngine = com.example.hardware.KennedeAutomationEngine(
     application,
@@ -488,7 +488,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       }
     }
 
-    wakeWordDetector.onVoiceActivityDetected = { keyword, confidence ->
+    voiceActivityDetector.onVoiceActivityDetected = { keyword, confidence ->
       _speechStatus.value = "နားထောင်နေပါသည် (Voice Activity: $keyword)"
       _lastMessage.value = "ကျော်ကြီး အသင့်ရှိပါသည် ခင်ဗျာ။ မိန့်တော်မူပါ"
       realActionExecutor.speakText("ခင်ဗျာ၊ ကျော်ကြီး အသင့်ရှိပါသည်")

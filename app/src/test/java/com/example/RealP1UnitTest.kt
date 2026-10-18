@@ -2,7 +2,7 @@ package com.example
 
 import com.example.nlu.MyanmarVoiceParser
 import com.example.nlu.ParsedIntent
-import com.example.service.AudioRecordWakeWordDetector
+import com.example.service.AudioRecordVoiceActivityDetector
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -148,29 +148,29 @@ class RealP1UnitTest {
 
   @Test
   fun testVoiceActivityStateMachine_HonestTriggerRelabel() {
-    val stateMachine = AudioRecordWakeWordDetector.WakeWordStateMachine()
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.IDLE, stateMachine.currentState)
+    val stateMachine = AudioRecordVoiceActivityDetector.WakeWordStateMachine()
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.IDLE, stateMachine.currentState)
 
     var simulatedTime = 10000L
 
     // S1: Syllable entrance
     stateMachine.processFrame(simulatedTime, isSpeechBand = true, spectralTilt = 1.0f, snr = 15.0f)
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.SYLLABLE_KYAW, stateMachine.currentState)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.SYLLABLE_KYAW, stateMachine.currentState)
 
     // Dip
     simulatedTime += 200
     stateMachine.processFrame(simulatedTime, isSpeechBand = true, spectralTilt = 2.0f, snr = 3.0f)
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.INTER_SYLLABLE_DIP, stateMachine.currentState)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.INTER_SYLLABLE_DIP, stateMachine.currentState)
 
     // S2
     simulatedTime += 100
     stateMachine.processFrame(simulatedTime, isSpeechBand = true, spectralTilt = 1.2f, snr = 16.0f)
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.SYLLABLE_GYI, stateMachine.currentState)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.SYLLABLE_GYI, stateMachine.currentState)
 
     // Second syllable sustained trigger
     simulatedTime += 250
     stateMachine.processFrame(simulatedTime, isSpeechBand = true, spectralTilt = 1.0f, snr = 18.0f)
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.IDLE, stateMachine.currentState)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.IDLE, stateMachine.currentState)
 
     assertNotNull("Trigger event must fire", stateMachine.detectedEvent)
     val (keyword, confidence) = stateMachine.detectedEvent!!

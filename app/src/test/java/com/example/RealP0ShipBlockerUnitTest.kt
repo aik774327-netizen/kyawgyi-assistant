@@ -2,7 +2,7 @@ package com.example
 
 import com.example.nlu.MyanmarVoiceParser
 import com.example.nlu.ParsedIntent
-import com.example.service.AudioRecordWakeWordDetector
+import com.example.service.AudioRecordVoiceActivityDetector
 import com.kyawgyi.ir.apikey.ApiKeyStatus
 import com.kyawgyi.ir.apikey.ApiKeyTier
 import com.kyawgyi.ir.apikey.ApiKeyValidator
@@ -180,8 +180,8 @@ class RealP0ShipBlockerUnitTest {
 
   @Test
   fun testWakeWordStateMachine_Transitions_IdleToDetected() {
-    val stateMachine = AudioRecordWakeWordDetector.WakeWordStateMachine()
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.IDLE, stateMachine.currentState)
+    val stateMachine = AudioRecordVoiceActivityDetector.WakeWordStateMachine()
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.IDLE, stateMachine.currentState)
 
     // Ensure initial timestamp is well past any 0L cooldown
     var simulatedTime = 5000L
@@ -193,7 +193,7 @@ class RealP0ShipBlockerUnitTest {
       spectralTilt = 0.5f,
       snr = 2.0f
     )
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.IDLE, s1)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.IDLE, s1)
     assertEquals(null, stateMachine.detectedEvent)
 
     // Frame 2: First syllable "Kyaw" detected (speech band, good spectral tilt, high SNR)
@@ -204,7 +204,7 @@ class RealP0ShipBlockerUnitTest {
       spectralTilt = 1.0f,
       snr = 15.0f
     )
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.SYLLABLE_KYAW, s2)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.SYLLABLE_KYAW, s2)
     assertEquals(null, stateMachine.detectedEvent)
 
     // Frame 3: Inter-syllable dip arrives within valid duration (200ms later, low SNR / high tilt dip)
@@ -215,7 +215,7 @@ class RealP0ShipBlockerUnitTest {
       spectralTilt = 2.0f,
       snr = 3.0f
     )
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.INTER_SYLLABLE_DIP, s3)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.INTER_SYLLABLE_DIP, s3)
     assertEquals(null, stateMachine.detectedEvent)
 
     // Frame 4: Second syllable "Gyi" arrives within dip window (100ms later)
@@ -226,7 +226,7 @@ class RealP0ShipBlockerUnitTest {
       spectralTilt = 1.2f,
       snr = 16.0f
     )
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.SYLLABLE_GYI, s4)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.SYLLABLE_GYI, s4)
 
     // Frame 5: Second syllable sustains (250ms later) -> Triggers detection & transitions back to IDLE
     simulatedTime += 250
@@ -236,7 +236,7 @@ class RealP0ShipBlockerUnitTest {
       spectralTilt = 1.0f,
       snr = 18.0f
     )
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.IDLE, s5)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.IDLE, s5)
     assertNotNull("Wake word event must be fired", stateMachine.detectedEvent)
     val (keyword, confidence) = stateMachine.detectedEvent!!
     assertTrue("Keyword must identify Kyaw Gyi", keyword.contains("Kyaw Gyi") || keyword.contains("ကျော်ကြီး"))
@@ -245,7 +245,7 @@ class RealP0ShipBlockerUnitTest {
 
   @Test
   fun testWakeWordStateMachine_Timeout_ResetsToIdle() {
-    val stateMachine = AudioRecordWakeWordDetector.WakeWordStateMachine()
+    val stateMachine = AudioRecordVoiceActivityDetector.WakeWordStateMachine()
     var simulatedTime = 5000L
 
     // Enter first syllable
@@ -255,7 +255,7 @@ class RealP0ShipBlockerUnitTest {
       spectralTilt = 1.0f,
       snr = 15.0f
     )
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.SYLLABLE_KYAW, stateMachine.currentState)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.SYLLABLE_KYAW, stateMachine.currentState)
 
     // If syllable lasts > 500ms without dip -> Aborts back to IDLE
     simulatedTime += 600
@@ -265,7 +265,7 @@ class RealP0ShipBlockerUnitTest {
       spectralTilt = 1.0f,
       snr = 15.0f
     )
-    assertEquals(AudioRecordWakeWordDetector.AcousticState.IDLE, sTimeout)
+    assertEquals(AudioRecordVoiceActivityDetector.AcousticState.IDLE, sTimeout)
     assertEquals(null, stateMachine.detectedEvent)
   }
 }
