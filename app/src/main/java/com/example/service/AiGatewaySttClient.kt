@@ -54,7 +54,12 @@ class AiGatewaySttClient(private val context: Context) {
 
   companion object {
     private const val TAG = "AiGatewaySttClient"
-    private const val DEFAULT_BACKEND_URL = "http://10.0.2.2:3000" // Android emulator loopback to host
+    // Audit finding #16: the previous hardcoded "http://10.0.2.2:3000" emulator loopback
+    // was attempted on real devices (and is cleartext-blocked by the network security
+    // config anyway). The backend is now DISABLED by default; deploy app/api (see
+    // app/api/README.md) and call setBackendUrl() to enable it.
+    private const val DEFAULT_BACKEND_URL = ""
+    private const val PREF_BACKEND_URL_OVERRIDE = "backend_url_override"
     private const val CACHE_PREFS = "ai_gateway_cache_prefs"
   }
 
@@ -340,6 +345,11 @@ class AiGatewaySttClient(private val context: Context) {
   }
 
   private fun tryBackendStt(wavBytes: ByteArray, audioHash: String): AiGatewaySttResult? {
+    val backendUrl = getBackendUrl()
+    if (backendUrl.isBlank()) {
+      // Backend disabled (default): skip to Direct Gemini -> local fallback chain.
+      return null
+    }
     try {
       val base64 = Base64.encodeToString(wavBytes, Base64.NO_WRAP)
       val jsonBody = JSONObject().apply {
@@ -347,7 +357,7 @@ class AiGatewaySttClient(private val context: Context) {
       }.toString().toRequestBody("application/json".toMediaType())
 
       val request = Request.Builder()
-        .url("$DEFAULT_BACKEND_URL/api/stt")
+        .url("$backendUrl/api/stt")
         .post(jsonBody)
         .build()
 
@@ -382,6 +392,24 @@ class AiGatewaySttClient(private val context: Context) {
     val fromEnv = System.getenv("GEMINI_API_KEY")
     if (!fromEnv.isNullOrEmpty()) return fromEnv
     return ""
+  }
+
+  /**
+   * Returns the configured AI Gateway backend base URL, or "" when disabled.
+   * Resolution: SharedPreferences override -> DEFAULT_BACKEND_URL ("", disabled).
+   */
+  fun getBackendUrl(): String {
+    val override = prefs.getString(PREF_BACKEND_URL_OVERRIDE, null)?.trim()
+    if (!override.isNullOrEmpty()) return override
+    return DEFAULT_BACKEND_URL
+  }
+
+  /**
+   * Points the client at a self-hosted gateway (see app/api/README.md).
+   * Pass "" to disable the backend tier entirely (default).
+   */
+  fun setBackendUrl(url: String) {
+    prefs.edit().putString(PREF_BACKEND_URL_OVERRIDE, url.trim()).apply()
   }
 
   private fun tryDirectGeminiStt(

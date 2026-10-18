@@ -12,7 +12,6 @@ import com.example.permissions.DirectRouteManager
 import com.example.ui.MainScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.MainViewModel
-import com.kyawgyi.ir.service.VoiceForegroundService
 import com.kyawgyi.ir.utils.PermissionManager
 
 class MainActivity : ComponentActivity() {

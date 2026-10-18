@@ -485,7 +485,7 @@ private fun ActiveKeyOverviewCard(
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
         Text(
-          "ခွဲတမ်း အသုံးပြုမှု: ${activeKey?.usedQuota ?: 0} / ${activeKey?.maxQuota ?: 0}",
+          "ခွဲတမ်း အသုံးပြုမှု (ခန့်မှန်းချက်): ${activeKey?.usedQuota ?: 0} / ${activeKey?.maxQuota ?: 0}",
           style = MaterialTheme.typography.labelMedium
         )
         Text(
@@ -528,6 +528,14 @@ private fun ActiveKeyOverviewCard(
           )
         }
       }
+
+      // Audit finding #12: usage is a client-side estimate, not Google's actual quota.
+      Text(
+        "မှတ်ချက်: ဤရာခိုင်နှုန်းသည် စက်တွင်း ခန့်မှန်းချက်သာ — Google ၏ တကယ့်ခွဲတမ်းနှင့် ကွာခြားနိုင်သည်။",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp)
+      )
 
       Spacer(Modifier.height(16.dp))
 

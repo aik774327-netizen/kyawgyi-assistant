@@ -140,13 +140,18 @@ class PermissionManager(
   }
 
   /**
-   * Checks microphone permission and activates VoiceForegroundService if permitted.
+   * Checks microphone permission and activates the live voice foreground service if permitted.
    * If permission is missing, requests essential permissions first.
+   *
+   * NOTE (#23 fix): previously pointed at com.kyawgyi.ir.service.VoiceForegroundService,
+   * which was never declared in the manifest and never started (dead code, now removed).
+   * The live mic foreground service is com.example.service.VoiceListeningService.
    */
   fun startVoiceServiceIfPermitted(): Boolean {
     updateStates()
     return if (hasMicrophonePermission(activity)) {
-      com.kyawgyi.ir.service.VoiceForegroundService.startService(activity)
+      com.example.service.VoiceListeningService.startService(activity)
+      true
     } else {
       requestEssentialPermissions()
       false

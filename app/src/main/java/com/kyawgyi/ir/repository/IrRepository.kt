@@ -1,5 +1,15 @@
 package com.kyawgyi.ir.repository
 
+/**
+ * ESP32 IR blaster repository contract (audit #27, 2026-10-18).
+ *
+ * Architecture note: production IR control flows through
+ * `com.example.realworld.RealHardwareBridge` / `PhoneIrBlaster` (wired in MainViewModel).
+ * This repository interface defines the ESP32-backed IR contract and is retained because
+ * it is covered by `RealWorldMismatchTest` (honest no-hallucination behavior when no
+ * IR hardware is present). The duplicate UI screens that once consumed it
+ * (com/kyawgyi/ir/ui/*, com/example/ui/screens/* IR screens) were dead and removed.
+ */
 import com.kyawgyi.ir.models.Esp32StatusResponse
 import com.kyawgyi.ir.models.GenericApiResponse
 import com.kyawgyi.ir.models.IrButton

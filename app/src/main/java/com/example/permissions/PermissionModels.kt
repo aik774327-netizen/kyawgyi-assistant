@@ -199,7 +199,7 @@ data class SystemPermissionsState(
   val isFirebaseConfigured: Boolean = true,
   val isEcoFlowCloudConfigured: Boolean = false,
   val ecoFlowBleReadiness: EcoFlowBleReadiness = EcoFlowBleReadiness.PERMISSION_REQUIRED,
-  val isVoiceForegroundServiceActive: Boolean = false,
+  val isVoiceListeningServiceActive: Boolean = false,
   val overallReadiness: SystemReadiness = SystemReadiness.YELLOW,
   val manufacturer: String = android.os.Build.MANUFACTURER,
   val androidVersion: Int = android.os.Build.VERSION.SDK_INT,
