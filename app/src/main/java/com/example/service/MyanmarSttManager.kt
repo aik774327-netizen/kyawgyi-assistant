@@ -31,6 +31,11 @@ class MyanmarSttManager(private val context: Context) {
   private var speechRecognizer: SpeechRecognizer? = null
   private var isListeningNow = false
 
+  // Audit B5: wall-clock start of the current native recognition, used to
+  // report a MEASURED duration instead of a hardcoded one.
+  @Volatile
+  private var nativeListenStartMs: Long = 0L
+
   // Settings
   private val _useWavAiGateway = MutableStateFlow(true)
   val useWavAiGateway: StateFlow<Boolean> = _useWavAiGateway.asStateFlow()
@@ -203,6 +208,7 @@ class MyanmarSttManager(private val context: Context) {
       }
 
       override fun onBeginningOfSpeech() {
+        nativeListenStartMs = System.currentTimeMillis() // audit B5: measured duration
         onSpeechStateChanged?.invoke("စကားပြောသံကို ဖမ်းယူနေပါသည်...")
       }
 
@@ -255,18 +261,28 @@ class MyanmarSttManager(private val context: Context) {
             _lastCorrectedText.value = grammarRes.correctedText
             _partialText.value = grammarRes.correctedText
 
-            val simulatedResult = AiGatewaySttResult(
+            // Audit B5: this result was previously named "simulatedResult"
+            // with fabricated metadata (confidence 0.95, duration 1.5 s).
+            // The transcript is real (native SpeechRecognizer); confidence
+            // now comes from the recognizer's own CONFIDENCE_SCORES when it
+            // provides them (0f = not provided), and duration is measured.
+            val realConfidence = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+              ?.firstOrNull() ?: 0f
+            val measuredDurationSec = if (nativeListenStartMs > 0L) {
+              (System.currentTimeMillis() - nativeListenStartMs) / 1000f
+            } else 0f
+            val resultDetails = AiGatewaySttResult(
               rawTranscript = rawMatch,
               correctedText = grammarRes.correctedText,
               corrections = grammarRes.corrections,
-              confidence = 0.95f,
-              durationSec = 1.5f,
+              confidence = realConfidence,
+              durationSec = measuredDurationSec,
               isCached = grammarRes.isCached,
               model = "native-stt+ai-gateway",
               audioHash = aiGatewayClient.computeSha256(rawMatch.toByteArray())
             )
-            _lastResultDetails.value = simulatedResult
-            onGrammarDetailResult?.invoke(simulatedResult)
+            _lastResultDetails.value = resultDetails
+            onGrammarDetailResult?.invoke(resultDetails)
             onFinalResult?.invoke(grammarRes.correctedText)
           }
         } else {

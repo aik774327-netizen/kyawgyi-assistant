@@ -95,6 +95,10 @@ class CentralAudioRecorder private constructor(private val appContext: Context) 
     val minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE_HZ, CHANNEL_CONFIG, AUDIO_FORMAT)
     if (minBufferSize <= 0) {
       Log.e(TAG, "Invalid minBufferSize: $minBufferSize")
+      // Audit B4: the subscriber increment above must be rolled back on
+      // every failure exit, or failed starts inflate the count and stop()
+      // never releases the microphone.
+      _activeSubscribers.value = (_activeSubscribers.value - 1).coerceAtLeast(0)
       return false
     }
 
@@ -112,6 +116,7 @@ class CentralAudioRecorder private constructor(private val appContext: Context) 
       if (record.state != AudioRecord.STATE_INITIALIZED) {
         Log.e(TAG, "AudioRecord failed to initialize (State != STATE_INITIALIZED)")
         record.release()
+        _activeSubscribers.value = (_activeSubscribers.value - 1).coerceAtLeast(0) // audit B4 rollback
         return false
       }
 
@@ -127,6 +132,7 @@ class CentralAudioRecorder private constructor(private val appContext: Context) 
       return true
     } catch (e: Exception) {
       Log.e(TAG, "Failed to start CentralAudioRecorder", e)
+      _activeSubscribers.value = (_activeSubscribers.value - 1).coerceAtLeast(0) // audit B4 rollback
       cleanupLocked()
       return false
     }

@@ -100,8 +100,10 @@ class AppLifecycleManager(private val context: Context) {
     val cleanKey = targetApp.lowercase().trim()
 
     // Special: "အက်ပ်အားလုံးပိတ်", "ပင်မမျက်နှာပြင်သို့သွားပါ", "close all"
+    // Audit A6: this only navigates Home — it does not close any app, and the
+    // message must not claim it did.
     if (cleanKey.contains("အားလုံး") || cleanKey.contains("all") || cleanKey.contains("home") || cleanKey.contains("ပင်မ")) {
-      return returnToHomeScreen("အက်ပ်များအားလုံးကို ပိတ်ပြီး ပင်မ Home မျက်နှာပြင်သို့ ပြန်လည်ရောက်ရှိပါပြီ ခင်ဗျာ။")
+      return returnToHomeScreen("ပင်မ Home မျက်နှာပြင်သို့ ပြန်လည်ရောက်ရှိပါပြီ ခင်ဗျာ။")
     }
 
     val appInfo = knownAppDirectory[cleanKey] ?: knownAppDirectory.entries.firstOrNull {
@@ -117,10 +119,14 @@ class AppLifecycleManager(private val context: Context) {
         am?.killBackgroundProcesses(targetPackage)
       }
 
-      // Return to home screen to close active app view
+      // Return to home screen (the app view leaves the foreground)
       returnToHomeScreen()
 
-      return ActionResult.Success("$targetName အက်ပ်ကို ပိတ်ပြီး ပင်မမျက်နှာပြင်သို့ ပြန်လည်ပို့ဆောင်ပေးလိုက်ပါပြီ ခင်ဗျာ။")
+      // Audit A6: killBackgroundProcesses cannot terminate a foreground app,
+      // so the old message ("အက်ပ်ကို ပိတ်ပြီး") overstated what happened.
+      // Report exactly what was done; Android gives no API to force-close
+      // another app's foreground screen without root/device-owner.
+      return ActionResult.Success("$targetName ၏ နောက်ကွယ်လုပ်ငန်းစဉ်များကို ရပ်တန့်ပြီး ပင်မ Home မျက်နှာပြင်သို့ ပြန်သွားပါပြီ။ (Android စနစ်အရ အခြားအက်ပ်၏ မျက်နှာပြင်ကို တိုက်ရိုက် အပြီးပိတ်ခွင့် မရှိပါ — အပြီးပိတ်လိုပါက Recent Apps မှ ပိတ်ပါ) ခင်ဗျာ။")
     } catch (e: Exception) {
       return ActionResult.Failure(
         category = ErrorCategory.TECHNICAL,

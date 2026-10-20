@@ -67,11 +67,14 @@ class RealEsp32IrClient(private var esp32Host: String = "192.168.1.150") {
         }
       }
 
+      // Audit B11: capability flags previously defaulted to true when the
+      // JSON omitted them, so any JSON server could be misread as a healthy
+      // ESP32 with receiver+transmitter. Absent now means absent (false).
       val status = Esp32Status(
         device = json.optString("device", "KENNEDE KN-5996HRB"),
-        esp32 = json.optBoolean("esp32", true),
-        receiver = json.optBoolean("receiver", true),
-        transmitter = json.optBoolean("transmitter", true),
+        esp32 = json.optBoolean("esp32", false),
+        receiver = json.optBoolean("receiver", false),
+        transmitter = json.optBoolean("transmitter", false),
         carrierFrequency = json.optInt("carrierFrequency", 38000),
         learning = json.optBoolean("learning", false),
         learningTarget = json.optString("learningTarget", ""),

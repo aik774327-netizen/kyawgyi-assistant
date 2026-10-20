@@ -26,14 +26,11 @@ class RealContactsRepository(private val context: Context) {
 
   companion object {
     private const val TAG = "RealContactsRepository"
-
-    // Default emergency/quick aliases when contacts list is empty or for fallback
-    val DEFAULT_SEED_CONTACTS = listOf(
-      ContactItem("c1", "အမေ (Mother)", "09778899111", "အမေ"),
-      ContactItem("c2", "အဖေ (Father)", "09778899222", "အဖေ"),
-      ContactItem("c3", "ရုံး (Office)", "09778899333", "အလုပ်"),
-      ContactItem("c4", "သူငယ်ချင်း (Kyaw Kyaw)", "09778899444", "သူငယ်ချင်း")
-    )
+    // Audit B13: a DEFAULT_SEED_CONTACTS list with invented phone numbers
+    // (e.g. "အမေ" -> 09778899111) used to live here and could be returned —
+    // or loaded into UI state — indistinguishable from real contacts.
+    // Removed: this repository returns ONLY real ContactsContract data;
+    // an empty result is reported honestly as empty.
   }
 
   fun hasContactsPermission(): Boolean {
@@ -45,13 +42,13 @@ class RealContactsRepository(private val context: Context) {
 
   /**
    * Fetches real phone contacts from device ContactsContract.
-   * If permission is granted, returns real list.
-   * If permission is denied or contacts list is empty, returns empty list (unless includeSeedFallback is true).
+   * If permission is denied or the device has no contacts, returns an
+   * empty list — never fabricated entries.
    */
-  suspend fun getContacts(includeSeedFallback: Boolean = false): List<ContactItem> = withContext(Dispatchers.IO) {
+  suspend fun getContacts(): List<ContactItem> = withContext(Dispatchers.IO) {
     if (!hasContactsPermission()) {
-      Log.i(TAG, "READ_CONTACTS permission not granted. Returning empty or seed list.")
-      return@withContext if (includeSeedFallback) DEFAULT_SEED_CONTACTS else emptyList()
+      Log.i(TAG, "READ_CONTACTS permission not granted. Returning empty list.")
+      return@withContext emptyList()
     }
 
     val realContacts = mutableListOf<ContactItem>()
@@ -113,12 +110,7 @@ class RealContactsRepository(private val context: Context) {
       cursor?.close()
     }
 
-    if (realContacts.isEmpty() && includeSeedFallback) {
-      Log.w(TAG, "No contacts found on device, returning seed contacts")
-      DEFAULT_SEED_CONTACTS
-    } else {
-      realContacts
-    }
+    realContacts
   }
 
   /**

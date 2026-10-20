@@ -16,6 +16,12 @@ class MyanmarTtsEngine(private val context: Context) {
   private var isMyanmarSupported = false
   private val myanmarLocale = Locale("my", "MM")
 
+  // Audit B3: an utterance requested before the engine finished initializing
+  // used to be silently dropped (speak() re-initialized and returned). It is
+  // now queued and spoken as soon as initialization succeeds.
+  @Volatile
+  private var pendingUtterance: String? = null
+
   var onSpeechStarted: (() -> Unit)? = null
   var onSpeechCompleted: (() -> Unit)? = null
   var onSpeechError: ((String) -> Unit)? = null
@@ -108,6 +114,12 @@ class MyanmarTtsEngine(private val context: Context) {
     })
 
     isInitialized = true
+
+    // Flush the utterance queued while initializing (audit B3).
+    pendingUtterance?.let { queued ->
+      pendingUtterance = null
+      speak(queued)
+    }
   }
 
   private fun selectBestVoice(engine: TextToSpeech) {
@@ -135,7 +147,11 @@ class MyanmarTtsEngine(private val context: Context) {
    */
   fun speak(text: String, utteranceId: String = "KyawGyiSpeech_${System.currentTimeMillis()}") {
     if (!isInitialized || tts == null) {
-      initializeEngine()
+      // Queue instead of dropping (audit B3). Only start initialization when
+      // no engine exists yet — re-calling initializeEngine() while an init is
+      // already in flight stacked a second TextToSpeech instance.
+      pendingUtterance = text
+      if (tts == null) initializeEngine()
       return
     }
 

@@ -44,18 +44,27 @@ class FanSleepTimerReceiver : BroadcastReceiver() {
           if (engine != null) {
             engine.onSleepTimerExpired()
           } else {
+            // Fallback (engine process dead): transmit directly, and only
+            // announce execution when a signal was actually sent (audit A3 —
+            // previously the "executed" notification fired even with no
+            // emitter or no preset code, when nothing was transmitted).
             val phoneIr = PhoneIrBlaster(context)
+            var transmitted = false
             if (phoneIr.hasIrEmitter) {
               val preset = phoneIr.getKennedePresetProfiles()[KennedeButton.POWER]
               if (preset != null && preset.rawTiming.isNotEmpty()) {
-                phoneIr.transmitPattern(38000, preset.rawTiming.toIntArray())
+                transmitted = phoneIr.transmitPattern(38000, preset.rawTiming.toIntArray()).isSuccess
               }
             }
-            NotificationManagementHelper.getInstance(context).notifyIrCommandExecuted(
-              deviceName = "KENNEDE KN-5996HRB",
-              buttonLabel = "POWER OFF (SLEEP TIMER)",
-              burmeseLabel = "အချိန်ကိုက် အလိုအလျောက် ပိတ်ခြင်း"
-            )
+            if (transmitted) {
+              NotificationManagementHelper.getInstance(context).notifyIrCommandExecuted(
+                deviceName = "KENNEDE KN-5996HRB",
+                buttonLabel = "POWER OFF (SLEEP TIMER)",
+                burmeseLabel = "အချိန်ကိုက် အလိုအလျောက် ပိတ်ခြင်း"
+              )
+            } else {
+              Log.w(TAG, "Sleep timer expired but no IR transmission was possible (no emitter or no preset code)")
+            }
           }
         } catch (e: Exception) {
           Log.e(TAG, "Error executing sleep timer expired logic", e)

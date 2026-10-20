@@ -107,8 +107,16 @@ class PhoneIrBlaster(private val context: Context) {
   }
 
   /**
-   * Verified factory preset NEC codes for KENNEDE KN-5996HRB rechargeable fan.
+   * Built-in preset NEC codes for KENNEDE KN-5996HRB rechargeable fan.
    * Address: 0x00, Carrier: 38 kHz (38,000 Hz)
+   *
+   * Audit A4 (honesty): these are built-in ESTIMATES shipped with the app.
+   * They were NOT captured from a physical remote and are NOT factory
+   * verified — no capture provenance exists. They are transmittable so the
+   * user can try them immediately; any button that does not respond should
+   * be replaced with a real code via ESP32 Learning Mode. (Previously this
+   * KDoc claimed "Verified factory preset" and the codes were persisted
+   * with isVerified = true — both claims were false.)
    */
   fun getKennedePresetProfiles(): Map<KennedeButton, IrButtonProfile> {
     val presets = mapOf(

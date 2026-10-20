@@ -147,14 +147,31 @@ class SystemActionManager(private val context: Context) {
     if (brightnessPercent !in 0..100) {
       return false to "မျက်နှာပြင် အလင်းရောင် (Brightness) သည် ၀ မှ ၁၀၀ ကြားသာ ဖြစ်ရပါမည် (လက်ရှိပေးပို့ချက်: $brightnessPercent%)။ သတ်မှတ်ဘောင် ကျော်လွန်သဖြင့် ငြင်းပယ်ပါသည်"
     }
+    // Audit A5: previously this ignored the putInt result and the catch block
+    // returned true with a success-flavored message even when the write threw
+    // (e.g. WRITE_SETTINGS not granted) — success was reported with no effect.
+    // Also, on auto-brightness devices the value is inert until the mode is
+    // switched to manual, which the old code never did.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.System.canWrite(context)) {
+      return false to "မျက်နှာပြင် အလင်းရောင် ချိန်ညှိခွင့် (WRITE_SETTINGS) မပေးရသေးပါ — စနစ် Settings တွင် 'စနစ်ဆက်တင်များ ပြင်ဆင်ခွင့်' ကို ခွင့်ပြုပြီးမှ ထပ်ကြိုးစားပါ"
+    }
     return try {
       val resolver = context.contentResolver
+      Settings.System.putInt(
+        resolver,
+        Settings.System.SCREEN_BRIGHTNESS_MODE,
+        Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+      )
       val targetVal = (brightnessPercent * 255 / 100).coerceIn(0, 255)
-      Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, targetVal)
-      true to "မျက်နှာပြင် အလင်းရောင်ကို $brightnessPercent% သို့ ချိန်ညှိပြီးပါပြီ"
+      val written = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, targetVal)
+      if (written) {
+        true to "မျက်နှာပြင် အလင်းရောင်ကို $brightnessPercent% သို့ ချိန်ညှိပြီးပါပြီ"
+      } else {
+        false to "မျက်နှာပြင် အလင်းရောင် ချိန်ညှိ၍ မရပါ (စနစ်က ရေးသားမှုကို ငြင်းပယ်လိုက်ပါသည်)"
+      }
     } catch (e: Exception) {
-      Log.w(TAG, "Cannot directly set system brightness, checked valid range", e)
-      true to "မျက်နှာပြင် အလင်းရောင် $brightnessPercent% သို့ သတ်မှတ်ရန် စစ်ဆေးပြီးပါပြီ"
+      Log.w(TAG, "Cannot set system brightness", e)
+      false to "မျက်နှာပြင် အလင်းရောင် ချိန်ညှိ၍ မရပါ: ${e.localizedMessage ?: "အမည်မသိ အမှား"}"
     }
   }
 

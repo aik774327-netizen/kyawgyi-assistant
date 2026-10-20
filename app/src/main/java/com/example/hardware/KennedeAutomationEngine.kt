@@ -56,6 +56,12 @@ class KennedeAutomationEngine(
   private var timerJob: Job? = null
   private var lastCheckedBatteryPercent: Int? = null
 
+  // Audit A3: three independent expiry triggers exist (this engine's coroutine,
+  // the foreground service broadcast, and the AlarmManager receiver). Without a
+  // guard, two near-simultaneous triggers both transmit POWER — a toggle — and
+  // the second one turns the fan back ON. First trigger wins; the rest no-op.
+  private val expiryHandled = java.util.concurrent.atomic.AtomicBoolean(false)
+
   // Callback to dispatch IR signal via MainViewModel
   var sendIrCallback: ((KennedeButton, (Boolean, String) -> Unit) -> Unit)? = null
   var startLearningCallback: ((KennedeButton) -> Unit)? = null
@@ -131,6 +137,7 @@ class KennedeAutomationEngine(
     }
 
     timerJob?.cancel()
+    expiryHandled.set(false) // new timer: allow exactly one expiry handling
     val totalSeconds = minutes * 60
 
     _state.value = _state.value.copy(
@@ -247,6 +254,14 @@ class KennedeAutomationEngine(
    * Can be called directly or from FanSleepTimerReceiver when screen was locked.
    */
   fun onSleepTimerExpired() {
+    // Audit A3: single-fire guard (see expiryHandled) + honest result
+    // reporting. Previously this announced "fan turned off" by TTS and posted
+    // an "executed" notification unconditionally, even when the IR transmit
+    // was blocked (e.g. CODE_NOT_LEARNED) and nothing was sent.
+    if (!expiryHandled.compareAndSet(false, true)) {
+      Log.i(tag, "Sleep timer expiry already handled; ignoring duplicate trigger")
+      return
+    }
     timerJob?.cancel()
     timerJob = null
     cancelAlarm()
@@ -256,20 +271,40 @@ class KennedeAutomationEngine(
       sleepTimerMinutes = 0,
       sleepTimerRemainingSeconds = 0,
       sleepTimerActive = false,
-      lastAutomationEvent = "အချိန်ပြည့်သဖြင့် ပန်ကာပါဝါ ပိတ်ပေးလိုက်ပါပြီ",
+      lastAutomationEvent = "အချိန်ပြည့်ပါပြီ — ပန်ကာ ပါဝါပိတ်ရန် ကြိုးစားနေပါသည်",
       lastAutomationTimestamp = System.currentTimeMillis()
     )
 
-    sendIrCallback?.invoke(KennedeButton.POWER) { success, _ ->
-      Log.i(tag, "Sleep timer expired. Power off result: $success")
+    val callback = sendIrCallback
+    if (callback == null) {
+      reportSleepTimerPowerOff(success = false, detail = "IR ပို့ဆောင်ရေး လမ်းကြောင်း မချိတ်ဆက်ထားပါ")
+      return
     }
+    callback.invoke(KennedeButton.POWER) { success, detail ->
+      Log.i(tag, "Sleep timer expired. Power off result: $success ($detail)")
+      reportSleepTimerPowerOff(success, detail)
+    }
+  }
 
-    actionExecutor.speakText("အချိန်ပြည့်သွားပါပြီ။ KENNEDE ပန်ကာကို အလိုအလျောက် ပါဝါပိတ်ပေးလိုက်ပါပြီ ခင်ဗျာ။")
-    notificationHelper.notifyIrCommandExecuted(
-      deviceName = "KENNEDE KN-5996HRB",
-      buttonLabel = "POWER OFF (SLEEP TIMER)",
-      burmeseLabel = "အချိန်ကိုက် အလိုအလျောက် ပိတ်ခြင်း"
-    )
+  private fun reportSleepTimerPowerOff(success: Boolean, detail: String) {
+    if (success) {
+      _state.value = _state.value.copy(
+        lastAutomationEvent = "အချိန်ပြည့်သဖြင့် ပန်ကာပါဝါ ပိတ်ပေးလိုက်ပါပြီ",
+        lastAutomationTimestamp = System.currentTimeMillis()
+      )
+      actionExecutor.speakText("အချိန်ပြည့်သွားပါပြီ။ KENNEDE ပန်ကာကို အလိုအလျောက် ပါဝါပိတ်ပေးလိုက်ပါပြီ ခင်ဗျာ။")
+      notificationHelper.notifyIrCommandExecuted(
+        deviceName = "KENNEDE KN-5996HRB",
+        buttonLabel = "POWER OFF (SLEEP TIMER)",
+        burmeseLabel = "အချိန်ကိုက် အလိုအလျောက် ပိတ်ခြင်း"
+      )
+    } else {
+      _state.value = _state.value.copy(
+        lastAutomationEvent = "အချိန်ပြည့်သော်လည်း ပန်ကာ ပါဝါ မပိတ်နိုင်ပါ: $detail",
+        lastAutomationTimestamp = System.currentTimeMillis()
+      )
+      actionExecutor.speakText("အချိန်ပြည့်သွားပါပြီ၊ သို့သော် ပန်ကာ ပါဝါကို မပိတ်နိုင်ပါ။ $detail")
+    }
   }
 
   /**

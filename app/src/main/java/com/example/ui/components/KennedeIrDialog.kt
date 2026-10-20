@@ -762,7 +762,7 @@ private fun DashboardTab(
           ) {
             Column(modifier = Modifier.weight(1f)) {
               Text("KENNEDE စက်ရုံထုတ် ကုဒ်များ အသင့်ရှိသည်", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-              Text("မသင်ယူရသေးသော ခလုတ် ($unlearnedCount) ခုအတွက် Factory NEC ကုဒ်များ ထည့်သွင်းမည်", color = Color(0xFFA7F3D0), fontSize = 10.sp)
+              Text("ကုဒ်မရှိသေးသော ခလုတ် ($unlearnedCount) ခုအတွက် အခြေခံ Preset NEC ကုဒ်များ (စမ်းသပ်မထားသော) ထည့်သွင်းမည်", color = Color(0xFFA7F3D0), fontSize = 10.sp)
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
@@ -822,14 +822,14 @@ private fun DashboardTab(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Text(
-          text = "ခလုတ်များ၏ သင်ယူမှုအခြေအနေ (BUTTON LEARNING STATUS)",
+          text = "ခလုတ်များ၏ ကုဒ်အခြေအနေ (BUTTON CODE STATUS)",
           color = Color(0xFF94A3B8),
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold
         )
         val learnedCount = buttons.count { irDb.buttons[it.key]?.captured == true }
         Text(
-          text = "$learnedCount/5 LEARNED",
+          text = "$learnedCount/5 READY",
           color = if (learnedCount == 5) Color(0xFF10B981) else Color(0xFFF59E0B),
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold,
@@ -917,7 +917,7 @@ private fun DashboardTab(
                       .padding(horizontal = 5.dp, vertical = 1.dp)
                   ) {
                     Text(
-                      text = if (isLearned) "LEARNED" else "UNLEARNED",
+                      text = if (isLearned) "READY" else "NO CODE",
                       color = if (isLearned) Color(0xFF10B981) else Color(0xFFEF4444),
                       fontSize = 8.sp,
                       fontWeight = FontWeight.Bold,

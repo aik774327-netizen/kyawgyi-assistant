@@ -3,6 +3,8 @@ package com.example.service
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import com.example.BuildConfig
+import com.kyawgyi.ir.apikey.ApiKeyManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -72,6 +74,9 @@ class AiGatewaySttClient(private val context: Context) {
   // In-memory memory cache
   private val memoryCache = ConcurrentHashMap<String, AiGatewaySttResult>()
 
+  // The app's real, maintained API-key store (same source GeminiOnlineStrategy uses).
+  private val apiKeyManager = ApiKeyManager.getInstance(context)
+
   // Persistent Shared Preferences Cache
   private val prefs = context.getSharedPreferences(CACHE_PREFS, Context.MODE_PRIVATE)
 
@@ -135,10 +140,12 @@ class AiGatewaySttClient(private val context: Context) {
           return@withContext Result.success(directGeminiResult)
         }
 
-        // Local Rule Fallback if all else is unavailable
-        val localFallback = performLocalFallbackStt(audioHash)
-        saveToCache(audioHash, localFallback)
-        return@withContext Result.success(localFallback)
+        // All real STT tiers unavailable. This MUST fail honestly: an earlier
+        // version fabricated a fixed transcript ("EcoFlow ကို ဖွင့်ပေးပါဦး") here
+        // and reported it as a successful recognition — removed (audit A1).
+        throw IllegalStateException(
+          "STT လမ်းကြောင်းအားလုံး မရနိုင်ပါ (backend ပိတ်ထားသည် / Gemini key မရှိပါ သို့မဟုတ် ကွန်ရက် ပြတ်တောက်နေပါသည်)"
+        )
       } catch (e: Exception) {
         lastException = e
         Log.w(TAG, "STT attempt $attempt failed: ${e.message}")
@@ -149,8 +156,10 @@ class AiGatewaySttClient(private val context: Context) {
       }
     }
 
-    val finalFallback = performLocalFallbackStt(audioHash)
-    Result.success(finalFallback)
+    Result.failure(
+      lastException
+        ?: IllegalStateException("အသံကို စာသားအဖြစ် မပြောင်းနိုင်ပါ — ထပ်မံ ကြိုးစားပေးပါ")
+    )
   }
 
   /**
@@ -386,11 +395,20 @@ class AiGatewaySttClient(private val context: Context) {
     return null
   }
 
+  /**
+   * Resolves the Gemini API key from the app's real key store.
+   *
+   * Audit A1 root cause: this previously read a "gemini_key" value from this
+   * client's own cache prefs file — a value nothing in the app ever writes —
+   * so the direct-Gemini tier always saw an empty key and always failed.
+   * Priority now matches GeminiOnlineStrategy: user key from ApiKeyManager,
+   * then BuildConfig key; placeholders are never returned.
+   */
   private fun getGeminiApiKey(): String {
-    val fromPrefs = prefs.getString("gemini_key", null)
-    if (!fromPrefs.isNullOrEmpty()) return fromPrefs
-    val fromEnv = System.getenv("GEMINI_API_KEY")
-    if (!fromEnv.isNullOrEmpty()) return fromEnv
+    val userKey = apiKeyManager.getActiveSecretKey()
+    if (userKey.isNotBlank() && !ApiKeyManager.isPlaceholderKey(userKey)) return userKey
+    val buildKey = BuildConfig.GEMINI_API_KEY
+    if (buildKey.isNotBlank() && !ApiKeyManager.isPlaceholderKey(buildKey)) return buildKey
     return ""
   }
 
@@ -479,21 +497,6 @@ class AiGatewaySttClient(private val context: Context) {
       Log.w(TAG, "Direct Gemini STT call failed: ${e.message}")
     }
     return null
-  }
-
-  private fun performLocalFallbackStt(audioHash: String): AiGatewaySttResult {
-    val simulated = "EcoFlow ကို ဖွင့်ပေးပါဦး"
-    val norm = normalizeMyanmarLocal(simulated)
-    return AiGatewaySttResult(
-      rawTranscript = "EcoFlow ကို ဖွင့်ပေးပါအုံး",
-      correctedText = norm.correctedText,
-      corrections = norm.corrections,
-      confidence = 0.92f,
-      durationSec = 1.8f,
-      isCached = false,
-      model = "local-audio-processor",
-      audioHash = audioHash
-    )
   }
 
   private fun getFromCache(hash: String): AiGatewaySttResult? {

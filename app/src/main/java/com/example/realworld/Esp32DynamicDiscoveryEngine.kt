@@ -532,7 +532,13 @@ class Esp32DynamicDiscoveryEngine(
         .get()
         .build()
       val res = probeClient.newCall(req).execute()
-      val ok = res.isSuccessful
+      // Audit B12: HTTP 200 alone used to "verify" a device — any LAN web
+      // server answering on /api/status would be listed as an ESP32. Require
+      // the payload to actually look like ESP32 status JSON, the same check
+      // RealEsp32IrClient.diagnoseConnection performs.
+      val body = res.body?.string() ?: ""
+      val ok = res.isSuccessful &&
+        (body.contains("\"esp32\"") || body.contains("\"device\"") || body.contains("\"transmitter\""))
       res.close()
       ok
     } catch (_: Exception) {

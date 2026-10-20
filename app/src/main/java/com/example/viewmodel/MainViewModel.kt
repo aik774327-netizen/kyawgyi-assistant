@@ -21,6 +21,7 @@ import com.example.models.BluetoothDeviceItem
 import com.example.models.ContactItem
 import com.example.models.CustomShortcut
 import com.example.realworld.RealContactsRepository
+import com.kyawgyi.ir.apikey.ApiKeyManager
 import com.example.models.EcoFlowDeviceState
 import com.example.models.EcoFlowSeries
 import com.example.models.EcoFlowModel
@@ -552,8 +553,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   private fun initializeDefaults() {
-    _contacts.value = RealContactsRepository.DEFAULT_SEED_CONTACTS
-
     viewModelScope.launch {
       refreshDeviceContacts()
     }
@@ -607,7 +606,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
    */
   fun refreshDeviceContacts() {
     viewModelScope.launch {
-      val loaded = realContactsRepository.getContacts(includeSeedFallback = false)
+      val loaded = realContactsRepository.getContacts()
       _contacts.value = loaded
       if (loaded.isNotEmpty()) {
         _lastMessage.value = "ဖုန်းစာအုပ်မှ အဆက်အသွယ် (${loaded.size}) ခုကို ဖတ်ရှုရရှိပါပြီ ခင်ဗျာ။"
@@ -685,7 +684,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     _speechStatus.value = "စကားသံကို နားထောင်နေပါသည်..."
     _isListening.value = true
-    val lang = if (_selectedLanguage.value == "my") "my-MM" else "en-US"
+    // Audit B7: the Chinese chip stores "zh" but this mapping used to send
+    // every non-"my" value to en-US, so selecting Chinese silently used
+    // English STT. Map each stored value to its real locale.
+    val lang = when (_selectedLanguage.value) {
+      "my" -> "my-MM"
+      "zh" -> "zh-CN"
+      else -> "en-US"
+    }
     myanmarStt.startListening(lang)
   }
 
@@ -859,11 +865,93 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
    * 4. Explain error type and cause clearly in Burmese.
    * 5. Never suggest the failed method again; provide working alternative.
    */
+  // ---- Voice confirmation flow (audit A2) ----
+  // Previously CallContact / RequiresConfirmation only spoke a prompt and
+  // dead-ended: no state was kept, so the user's "yes" could never execute
+  // anything (and the contact resolver findContactByTarget had no callers).
+  // A pending action is now stored; the next command is checked for an
+  // affirmative / negative reply before normal parsing.
+  private sealed interface PendingVoiceConfirmation {
+    data class Call(val name: String, val number: String) : PendingVoiceConfirmation
+    data class RiskyAction(val action: String) : PendingVoiceConfirmation
+  }
+
+  @Volatile
+  private var pendingVoiceConfirmation: PendingVoiceConfirmation? = null
+
+  private fun isNegativeReply(text: String): Boolean {
+    val t = text.trim().lowercase()
+    val noTokens = listOf("မဟုတ်", "မခေါ်", "မလုပ်", "မလို", "မဖျက်", "ရပ်", "ပယ်ဖျက်", "cancel", "stop")
+    return noTokens.any { t.contains(it) } || t == "no"
+  }
+
+  private fun isAffirmativeReply(text: String): Boolean {
+    val t = text.trim().lowercase().trim('.', '!', '?')
+    if (t.length > 20 || isNegativeReply(t)) return false
+    val yesTokens = listOf(
+      "ဟုတ်ကဲ့", "ဟုတ်", "အင်း", "ခေါ်ပါ", "ခေါ်လိုက်", "လုပ်ပါ", "လုပ်လိုက်",
+      "ဖျက်ပါ", "ဖျက်လိုက်", "အတည်ပြု", "ဆက်လုပ်", "yes", "ok", "okay", "confirm"
+    )
+    return yesTokens.any { t.contains(it) }
+  }
+
+  private fun executePendingConfirmation(pending: PendingVoiceConfirmation) {
+    when (pending) {
+      is PendingVoiceConfirmation.Call -> dialContact(pending.name, pending.number)
+      is PendingVoiceConfirmation.RiskyAction -> when (pending.action) {
+        "DELETE_API_KEYS" -> viewModelScope.launch {
+          val manager = ApiKeyManager.getInstance(getApplication())
+          val ids = manager.keys.value.map { it.id }
+          ids.forEach { manager.removeApiKey(it) }
+          val msg = "အတည်ပြုချက်အရ API သော့ ${ids.size} ခုကို ဖျက်ပြီးပါပြီ"
+          _lastMessage.value = msg
+          realActionExecutor.speakText(msg)
+        }
+        "CLEAR_ALL_DATA" -> {
+          // Defined scope only: error records + memory aliases (the two real
+          // clear operations this app has). Contacts, IR codes and music are
+          // NOT touched, and the spoken result says exactly that.
+          clearAllErrorLogs()
+          clearAllMemory()
+          realActionExecutor.speakText(
+            "အတည်ပြုချက်အရ အမှားမှတ်တမ်းများနှင့် မှတ်ဉာဏ် အချက်အလက်များကို ရှင်းလင်းပြီးပါပြီ။ အဆက်အသွယ်၊ IR code နှင့် သီချင်းများကို မဖျက်ပါ"
+          )
+        }
+        else -> {
+          val msg = "ထိုလုပ်ဆောင်ချက်ကို လုပ်ဆောင်၍ မရပါ"
+          _lastMessage.value = msg
+          realActionExecutor.speakText(msg)
+        }
+      }
+    }
+  }
+
   fun processVoiceCommand(input: String) {
     val cleanInput = input.trim()
     if (cleanInput.isEmpty()) return
 
     stopListening()
+
+    // A pending confirmation consumes a yes/no reply before anything else.
+    val pending = pendingVoiceConfirmation
+    if (pending != null) {
+      when {
+        isAffirmativeReply(cleanInput) -> {
+          pendingVoiceConfirmation = null
+          executePendingConfirmation(pending)
+          return
+        }
+        isNegativeReply(cleanInput) -> {
+          pendingVoiceConfirmation = null
+          val msg = "ပယ်ဖျက်လိုက်ပါပြီ — မည်သည့်လုပ်ဆောင်ချက်မှ မလုပ်ခဲ့ပါ"
+          _lastMessage.value = msg
+          realActionExecutor.speakText(msg)
+          return
+        }
+        else -> pendingVoiceConfirmation = null // superseded by a new command
+      }
+    }
+
     _speechStatus.value = "\"$cleanInput\" ကို စစ်ဆေးနေပါသည်..."
 
     viewModelScope.launch {
@@ -937,10 +1025,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     when (intent) {
       // 1. Phone Calling with Real Intent (Risky action: requires explicit confirmation)
       is ParsedIntent.CallContact -> {
-        val prompt = intent.promptBurmese
-        val msg = "⚠️ [အတည်ပြုချက် လိုအပ်သည်] $prompt"
-        _lastMessage.value = msg
-        realActionExecutor.speakText(prompt)
+        // Audit A2: resolve the target against REAL device contacts first;
+        // only a resolved contact becomes a pending confirmation, and the
+        // dial happens in executePendingConfirmation after a "yes" reply.
+        val contacts = if (_contacts.value.isNotEmpty()) {
+          _contacts.value
+        } else {
+          realContactsRepository.getContacts().also { _contacts.value = it }
+        }
+        val match = realContactsRepository.findContactByTarget(intent.target, contacts)
+        if (match == null) {
+          val msg = if (!realContactsRepository.hasContactsPermission()) {
+            "ဖုန်းစာအုပ် ဖတ်ရှုခွင့် (READ_CONTACTS) မပေးရသေးသဖြင့် \"${intent.target}\" ကို မရှာနိုင်ပါ"
+          } else {
+            "\"${intent.target}\" အမည်ရှိ အဆက်အသွယ်ကို ဖုန်းစာအုပ်တွင် မတွေ့ရှိပါ"
+          }
+          _lastMessage.value = msg
+          realActionExecutor.speakText(msg)
+        } else {
+          pendingVoiceConfirmation = PendingVoiceConfirmation.Call(match.name, match.phoneNumber)
+          val prompt = "\"${match.name}\" (${match.phoneNumber}) သို့ ဖုန်းခေါ်ရန် သေချာပါသလား။ 'ဟုတ်ကဲ့' သို့မဟုတ် 'မဟုတ်ပါ' ဟု ပြောပါ"
+          _lastMessage.value = "⚠️ [အတည်ပြုချက် လိုအပ်သည်] $prompt"
+          realActionExecutor.speakText(prompt)
+        }
       }
 
       // Volume & Brightness Tool Control with Argument Validation
@@ -1357,6 +1464,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       }
 
       is ParsedIntent.RequiresConfirmation -> {
+        // Audit A2: keep the action pending so a "yes" reply actually
+        // executes it (see executePendingConfirmation).
+        pendingVoiceConfirmation = PendingVoiceConfirmation.RiskyAction(intent.action)
         val msg = "⚠️ [အတည်ပြုချက် လိုအပ်သည်] ${intent.promptBurmese}"
         _lastMessage.value = msg
         realActionExecutor.speakText(intent.promptBurmese)
@@ -2171,16 +2281,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             frequencyHz = 38000,
             pattern = profile.rawTiming.joinToString(","),
             brand = "Kennede",
-            isVerified = true
+            // Audit A4: built-in presets are unverified estimates — they must
+            // not be persisted as verified (they were, previously).
+            isVerified = false
           )
         )
       }
       _kennedeIrDb.value = _kennedeIrDb.value.copy(buttons = currentButtons)
-      val msg = "KENNEDE KN-5996HRB စက်ရုံထုတ် မူလကုဒ်များ (၁၀ ခု) ကို အောင်မြင်စွာ ထည့်သွင်းပြီးပါပြီ"
+      val msg = "KENNEDE KN-5996HRB အခြေခံ preset ကုဒ် (၁၀ ခု) ထည့်သွင်းပြီးပါပြီ (စက်ရုံစစ်/ဖမ်းယူထားသော ကုဒ်များ မဟုတ်ပါ — ခလုတ်တစ်ခု အလုပ်မလုပ်ပါက Learning Mode ဖြင့် အစားထိုးပါ)"
       _learningMessage.value = msg
       _lastMessage.value = msg
       realActionExecutor.speakText(msg)
-      logIrEvent("database", "load_presets", true, message = "Loaded 10 factory NEC profiles into Room")
+      logIrEvent("database", "load_presets", true, message = "Loaded 10 built-in preset NEC profiles (unverified) into Room")
 
       // Sync to ESP32 if online
       if (_esp32Status.value.esp32) {

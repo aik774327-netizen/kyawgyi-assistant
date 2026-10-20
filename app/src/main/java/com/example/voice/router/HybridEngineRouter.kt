@@ -39,7 +39,13 @@ class HybridEngineRouter(
 
   companion object {
     private const val TAG = "HybridEngineRouter"
-    const val GEMINI_TIMEOUT_MS = 1500L
+    // Audit B1: this was 1500 ms while the Gemini strategy's own HTTP read
+    // timeout is 10 s — a native-audio round trip virtually never completes
+    // in 1.5 s, so the first call was almost always abandoned and the
+    // "offline" fallback then repeated the identical Gemini call without a
+    // timeout (double API cost, added latency). The timeout now exceeds the
+    // strategy's read timeout so a healthy first call can actually finish.
+    const val GEMINI_TIMEOUT_MS = 12000L
   }
 
   private val _currentActiveEngine = MutableStateFlow<String>("Automatic (Hybrid)")
@@ -105,9 +111,10 @@ class HybridEngineRouter(
       return@withContext offlineStrategy.processAudioStream(makeReplayFlow())
     }
 
-    // Attempt Online with 1.5s timeout
+    // Attempt Online with a timeout that exceeds the strategy's HTTP read
+    // timeout (audit B1 — was 1.5 s, which discarded nearly every first call).
     _currentActiveEngine.value = geminiStrategy.engineName
-    Log.d(TAG, "Online detected. Routing to Gemini with 1.5s timeout.")
+    Log.d(TAG, "Online detected. Routing to Gemini with ${GEMINI_TIMEOUT_MS}ms timeout.")
 
     val geminiResult = withTimeoutOrNull(GEMINI_TIMEOUT_MS) {
       try {

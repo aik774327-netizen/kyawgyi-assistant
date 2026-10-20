@@ -143,7 +143,9 @@ fun MusicLibraryDialog(
                 color = TextPrimary
               )
               Text(
-                text = "စုစုပေါင်း ${allSongs.size} ပုဒ် • Offline Media3 Engine",
+                // Audit B10: playback is android.media.MediaPlayer, not
+                // Media3/ExoPlayer — the label now names the real engine.
+                text = "စုစုပေါင်း ${allSongs.size} ပုဒ် • Offline MediaPlayer Engine",
                 fontSize = 11.sp,
                 color = TextMuted
               )

@@ -315,7 +315,13 @@ User: "အသံတိုးပေး" -> Call control_device_setting(action="VO
       }
 
       AssistantResult.Success(
-        transcript = cleanReply,
+        // Audit B2: transcript previously duplicated the assistant's REPLY
+        // text, although the field is documented as the recognized USER
+        // utterance. This API call never requests a separate transcription,
+        // so the field is honestly left empty instead of mislabeling the
+        // reply as what the user said. (No production code consumes
+        // .transcript today; responseBurmese below carries the reply.)
+        transcript = "",
         responseBurmese = cleanReply,
         actionKey = actionKey,
         functionCall = functionCallPayload,
