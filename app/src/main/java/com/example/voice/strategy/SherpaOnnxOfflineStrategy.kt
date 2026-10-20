@@ -37,20 +37,10 @@ class SherpaOnnxOfflineStrategy(
       "အော့ဖ်လိုင်း စကားသံအသိအမှတ်ပြုစနစ် မရရှိနိုင်သေးပါ (မော်ဒယ်ဖိုင် ထည့်သွင်းထားခြင်း မရှိပါ)။ အင်တာနက်လိုင်း ရရှိပါက အွန်လိုင်းစနစ်ဖြင့် အလိုအလျောက် ဆောင်ရွက်ပေးပါမည်။"
   }
 
-  // Pre-compiled offline patterns for direct text matching (if text is supplied)
-  private val offlineCommands = listOf(
-    Regex(".*(ပန်ကာ|fan).*(ဖွင့်|open|on).*") to ("KENNEDE_FAN_POWER" to "ပန်ကာ ဖွင့်ပေးလိုက်ပါပြီ ခင်ဗျာ (Offline Mode)"),
-    Regex(".*(ပန်ကာ|fan).*(ပိတ်|off|close).*") to ("KENNEDE_FAN_POWER" to "ပန်ကာ ပိတ်ပေးလိုက်ပါပြီ ခင်ဗျာ (Offline Mode)"),
-    Regex(".*(လေအရှိန်|speed|အရှိန်).*") to ("KENNEDE_FAN_SPEED" to "လေအရှိန် ပြောင်းလဲပေးလိုက်ပါပြီ ခင်ဗျာ"),
-    Regex(".*(ဘယ်ညာ|လှည့်|လည်|oscil).*") to ("KENNEDE_FAN_OSCILLATION" to "ပန်ကာ ဘယ်ညာလည်ပေးလိုက်ပါပြီ"),
-    Regex(".*(မီး|light).*(ဖွင့်|ပိတ်|toggle).*") to ("KENNEDE_FAN_LIGHT" to "ပန်ကာမီး အဖွင့်/အပိတ် ပြုလုပ်ပြီးပါပြီ"),
-    Regex(".*(ဓာတ်မီး|လက်နှိပ်|torch|flash).*(ဖွင့်|open|on).*") to ("FLASHLIGHT_ON" to "လက်နှိပ်ဓာတ်မီး ဖွင့်ပေးလိုက်ပါပြီ (Offline)"),
-    Regex(".*(ဓာတ်မီး|လက်နှိပ်|torch|flash).*(ပိတ်|off).*") to ("FLASHLIGHT_OFF" to "လက်နှိပ်ဓာတ်မီး ပိတ်ပေးလိုက်ပါပြီ (Offline)"),
-    Regex(".*(အသံတိုး|volume down).*") to ("VOLUME_DOWN" to "အသံ လျှော့ချပေးလိုက်ပါပြီ (Offline)"),
-    Regex(".*(အသံကျယ်|volume up).*") to ("VOLUME_UP" to "အသံ မြှင့်တင်ပေးလိုက်ပါပြီ (Offline)"),
-    Regex(".*(အသံပိတ်|mute).*") to ("VOLUME_MUTE" to "အသံ ပိတ်ပေးလိုက်ပါပြီ (Offline)"),
-    Regex(".*(home|ပင်မ).*") to ("NAV_HOME" to "ပင်မစာမျက်နှာသို့ ပြန်ရောက်ပါပြီ")
-  )
+  // Audit C3: an offlineCommands regex table + evaluateOfflineText() used
+  // to live here. They had zero callers (the live text path is
+  // MyanmarVoiceParser, which now covers those command families itself),
+  // so the dead duplicate matcher was removed.
 
   fun isNetworkAvailable(): Boolean {
     return try {
@@ -109,19 +99,6 @@ class SherpaOnnxOfflineStrategy(
       errorMessage = OFFLINE_UNAVAILABLE_MESSAGE_BURMESE,
       isRetryable = true
     )
-  }
-
-  /**
-   * Evaluates text directly in offline mode.
-   */
-  fun evaluateOfflineText(text: String): Pair<String, String>? {
-    val clean = text.trim()
-    for ((pattern, result) in offlineCommands) {
-      if (pattern.matches(clean) || clean.contains(pattern.pattern.replace(".*", ""))) {
-        return result
-      }
-    }
-    return null
   }
 
   private fun checkVad(bytes: ByteArray): Boolean {

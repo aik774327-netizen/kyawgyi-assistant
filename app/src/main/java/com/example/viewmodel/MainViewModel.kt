@@ -1075,6 +1075,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       is ParsedIntent.OpenMusicLibrary -> "OPEN_MUSIC_LIBRARY"
       is ParsedIntent.OpenAssetDiagnostics -> "OPEN_ASSET_DIAGNOSTICS"
       is ParsedIntent.SetVolume -> "SET_VOLUME_${intent.percent}"
+      is ParsedIntent.AdjustVolume -> "ADJUST_VOLUME_${intent.direction}"
+      is ParsedIntent.SetFlashlight -> "SET_FLASHLIGHT_${intent.enabled}"
       is ParsedIntent.SetBrightness -> "SET_BRIGHTNESS_${intent.percent}"
       is ParsedIntent.Clarify -> "CLARIFY_INPUT"
       is ParsedIntent.SafetyBlocked -> "SAFETY_BLOCKED_${intent.hashCode()}"
@@ -1121,6 +1123,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           return
         }
         val result = systemActionManager.controlAudio(getApplication(), "SET_PERCENT", targetPercent = intent.percent)
+        _lastMessage.value = result.second
+        realActionExecutor.speakText(result.second)
+      }
+
+      // Audit P1: relative volume + flashlight, now parseable locally too
+      is ParsedIntent.AdjustVolume -> {
+        val result = when (intent.direction) {
+          "UP" -> systemActionManager.adjustVolume(true)
+          "DOWN" -> systemActionManager.adjustVolume(false)
+          else -> systemActionManager.muteVolume()
+        }
+        _lastMessage.value = result.second
+        realActionExecutor.speakText(result.second)
+      }
+
+      is ParsedIntent.SetFlashlight -> {
+        val result = systemActionManager.setFlashlight(intent.enabled)
         _lastMessage.value = result.second
         realActionExecutor.speakText(result.second)
       }

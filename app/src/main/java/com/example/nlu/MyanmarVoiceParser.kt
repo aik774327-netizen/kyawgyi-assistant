@@ -25,6 +25,10 @@ sealed class ParsedIntent(open val confidence: Float = 1.0f) {
   data class ToggleSystemSetting(val settingName: String, val enabled: Boolean, override val confidence: Float = 0.90f) : ParsedIntent(confidence)
   data class SetVolume(val percent: Int, override val confidence: Float = 0.95f) : ParsedIntent(confidence)
   data class SetBrightness(val percent: Int, override val confidence: Float = 0.95f) : ParsedIntent(confidence)
+  // Audit P1: relative volume + flashlight — previously only reachable via
+  // the Gemini/hybrid action-key path; the local parser dead-ended them.
+  data class AdjustVolume(val direction: String, override val confidence: Float = 0.90f) : ParsedIntent(confidence) // "UP" | "DOWN" | "MUTE"
+  data class SetFlashlight(val enabled: Boolean, override val confidence: Float = 0.90f) : ParsedIntent(confidence)
 
   // Safety & High-Risk Confirmation Intents (Audit Cases)
   data class SafetyBlocked(val rawCommand: String, val reasonBurmese: String, override val confidence: Float = 1.0f) : ParsedIntent(confidence)
@@ -164,6 +168,26 @@ object MyanmarVoiceParser {
         }
         return ParsedIntent.SetVolume(digits)
       }
+      // Audit P1: relative volume without a number ("အသံတိုး", "အသံလျော့",
+      // "အသံပိတ်") used to fall through to Clarify — the local parser only
+      // emitted SetVolume for digit+percent commands.
+      if (clean.contains("အသံပိတ်") || clean.contains("mute")) {
+        return ParsedIntent.AdjustVolume("MUTE")
+      }
+      if (clean.contains("အသံတိုး") || clean.contains("အသံကျယ်") || clean.contains("အသံချဲ့") || clean.contains("volume up")) {
+        return ParsedIntent.AdjustVolume("UP")
+      }
+      if (clean.contains("အသံလျော့") || clean.contains("အသံလျှော့") || clean.contains("အသံသေး") || clean.contains("volume down")) {
+        return ParsedIntent.AdjustVolume("DOWN")
+      }
+    }
+
+    // Audit P1: flashlight via the local parser. Distinct keywords only
+    // (ဓာတ်မီး / လက်နှိပ် / flashlight / torch) so plain "မီးဖွင့်" still
+    // means the fan light, exactly as before.
+    if (clean.contains("ဓာတ်မီး") || clean.contains("လက်နှိပ်") || clean.contains("flashlight") || clean.contains("torch")) {
+      val off = clean.contains("ပိတ်") || clean.contains("off")
+      return ParsedIntent.SetFlashlight(!off)
     }
 
     if (clean.contains("အလင်း") || clean.contains("brightness") || clean.contains("မီးရောင်")) {

@@ -274,13 +274,7 @@ class AudioRecordVoiceActivityDetector(
     stateMachine.reset()
   }
 
-  fun simulateWakeWordDetected() {
-    val event = VoiceActivityEvent(
-      keyword = VOICE_ACTIVITY_KEYWORD,
-      confidence = 0.96f,
-      timestampMs = System.currentTimeMillis()
-    )
-    _lastWakeWordEvent.value = event
-    onVoiceActivityDetected?.invoke(VOICE_ACTIVITY_KEYWORD, 0.96f)
-  }
+  // Audit C3: a simulateWakeWordDetected() helper used to live here — it
+  // fabricated a 0.96-confidence wake event on demand. It had zero callers
+  // and was removed so no future wiring can fake a wake detection.
 }
