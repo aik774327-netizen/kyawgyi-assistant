@@ -224,10 +224,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     if (!_hapticFeedbackEnabled.value) return
     try {
       val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-        (application.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
+        (getApplication<Application>().getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
       } else {
         @Suppress("DEPRECATION")
-        application.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+        getApplication<Application>().getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
       } ?: return
       if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
         vibrator.vibrate(
