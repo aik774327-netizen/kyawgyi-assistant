@@ -180,6 +180,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val _isOfflineMode = MutableStateFlow(false)
   val isOfflineMode: StateFlow<Boolean> = _isOfflineMode.asStateFlow()
 
+  // ---- Feedback settings (audit UI-1) ----
+  // The Settings "System Sound Effects" / "Haptic Vibration Feedback"
+  // toggles used to be dialog-local remember state: they persisted nothing,
+  // were read by nothing, and vanished when the dialog closed. They are now
+  // real persisted settings, consumed in handleActionResult (success
+  // vibration + success/alert tones) — see playUiTone() / vibrateFeedback().
+  private val feedbackPrefs =
+    application.getSharedPreferences("app_feedback_prefs", Context.MODE_PRIVATE)
+
+  private val _soundEffectsEnabled = MutableStateFlow(feedbackPrefs.getBoolean("sound_effects", true))
+  val soundEffectsEnabled: StateFlow<Boolean> = _soundEffectsEnabled.asStateFlow()
+
+  private val _hapticFeedbackEnabled = MutableStateFlow(feedbackPrefs.getBoolean("haptic_feedback", true))
+  val hapticFeedbackEnabled: StateFlow<Boolean> = _hapticFeedbackEnabled.asStateFlow()
+
+  fun setSoundEffectsEnabled(enabled: Boolean) {
+    _soundEffectsEnabled.value = enabled
+    feedbackPrefs.edit().putBoolean("sound_effects", enabled).apply()
+  }
+
+  fun setHapticFeedbackEnabled(enabled: Boolean) {
+    _hapticFeedbackEnabled.value = enabled
+    feedbackPrefs.edit().putBoolean("haptic_feedback", enabled).apply()
+  }
+
+  private var uiToneGenerator: android.media.ToneGenerator? = null
+
+  private fun playUiTone(success: Boolean) {
+    if (!_soundEffectsEnabled.value) return
+    try {
+      if (uiToneGenerator == null) {
+        uiToneGenerator = android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 60)
+      }
+      uiToneGenerator?.startTone(
+        if (success) android.media.ToneGenerator.TONE_PROP_BEEP else android.media.ToneGenerator.TONE_PROP_NACK,
+        150
+      )
+    } catch (_: Exception) {}
+  }
+
+  private fun vibrateFeedback() {
+    if (!_hapticFeedbackEnabled.value) return
+    try {
+      val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        (application.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
+      } else {
+        @Suppress("DEPRECATION")
+        application.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+      } ?: return
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        vibrator.vibrate(
+          android.os.VibrationEffect.createOneShot(35, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+        )
+      } else {
+        @Suppress("DEPRECATION")
+        vibrator.vibrate(35)
+      }
+    } catch (_: Exception) {}
+  }
+
   // Background Audio Sensing & TTS State
   val isBackgroundListening: StateFlow<Boolean> = VoiceListeningService.isServiceRunning
   val ambientNoiseDb: StateFlow<Float> = VoiceListeningService.ambientNoiseLevel
@@ -283,7 +343,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   // Music & Ingestion Services
   val musicRepository = com.example.ingestion.MusicRepository(application)
   val musicPlaybackManager = com.example.ingestion.MusicPlaybackManager(application)
-  val universalIngestionManager = com.example.ingestion.UniversalDataIngestionManager(application)
+  // Audit UI-5: a second UniversalDataIngestionManager instance used to be
+  // created here and never called (the live one belongs to
+  // AiAngelChatViewModel, which the chat UI actually uses). Removed.
   private var lastDisambiguationCandidates: List<com.example.database.MusicAssetEntity> = emptyList()
 
   // Real Production Bluetooth Engine
@@ -1498,8 +1560,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _lastMessage.value = result.message
         realActionExecutor.speakText(result.message)
         errorLearningEngine.markResolved(actionKey)
+        // Real consumption of the feedback settings (audit UI-1).
+        vibrateFeedback()
+        playUiTone(success = true)
       }
       is ActionResult.Failure -> {
+        playUiTone(success = false)
         errorLearningEngine.recordFailure(
           actionKey = actionKey,
           rawCommand = rawCommand,

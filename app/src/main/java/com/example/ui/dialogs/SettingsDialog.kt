@@ -91,6 +91,12 @@ fun SettingsDialog(
   onDismiss: () -> Unit,
   onAddShortcut: (String, String, String) -> Unit,
   onDeleteShortcut: (String) -> Unit,
+  // Audit UI-1: sound/haptic are real persisted settings owned by the
+  // ViewModel (consumed in handleActionResult), not dialog-local state.
+  soundEnabled: Boolean = true,
+  hapticEnabled: Boolean = true,
+  onSoundEnabledChange: (Boolean) -> Unit = {},
+  onHapticEnabledChange: (Boolean) -> Unit = {},
   onSaveEcoFlowConfig: (String, String, String, String) -> Unit = { _, _, _, _ -> },
   onRefreshContacts: () -> Unit = {},
   onSaveContactAlias: (String, String, String) -> Unit = { _, _, _ -> },
@@ -102,8 +108,12 @@ fun SettingsDialog(
   var isBatteryExempted by remember { mutableStateOf(bgManager.isBatteryOptimizationExempted()) }
 
   var selectedTab by remember { mutableIntStateOf(0) }
-  var soundEnabled by remember { mutableStateOf(true) }
-  var hapticEnabled by remember { mutableStateOf(true) }
+  // (sound/haptic state moved to ViewModel-backed params — audit UI-1)
+
+  // Add-shortcut form state (audit UI-3: onAddShortcut was wired by
+  // MainScreen but never invoked — there was no way to add a shortcut)
+  var newShortcutTitle by remember { mutableStateOf("") }
+  var newShortcutCommand by remember { mutableStateOf("") }
 
   // EcoFlow hardware keys state
   var ecoflowAccessKey by remember { mutableStateOf(currentConfig.accessKey) }
@@ -201,9 +211,9 @@ fun SettingsDialog(
 
             SettingToggleRow(
               title = "System Sound Effects",
-              sub = "မိုက်ခလုတ်နှိပ်သံနှင့် အချက်ပေးသံများ ဖွင့်ရန်",
+              sub = "လုပ်ဆောင်ချက် အောင်မြင်/သတိပေး အသံများ ဖွင့်ရန်",
               isChecked = soundEnabled,
-              onCheckedChange = { soundEnabled = it }
+              onCheckedChange = { onSoundEnabledChange(it) }
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -212,7 +222,7 @@ fun SettingsDialog(
               title = "Haptic Vibration Feedback",
               sub = "လုပ်ဆောင်ချက် အောင်မြင်မှု တုန်ခါမှု အချက်ပြစနစ်",
               isChecked = hapticEnabled,
-              onCheckedChange = { hapticEnabled = it }
+              onCheckedChange = { onHapticEnabledChange(it) }
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -250,6 +260,59 @@ fun SettingsDialog(
                 ) {
                   Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
                 }
+              }
+            }
+
+            // Add-shortcut form (audit UI-3)
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(text = "Shortcut အသစ် ထည့်ရန်", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              OutlinedTextField(
+                value = newShortcutTitle,
+                onValueChange = { newShortcutTitle = it },
+                placeholder = { Text("အမည် (ဥပမာ: မီးဖွင့်)", fontSize = 10.sp) },
+                modifier = Modifier.weight(1f),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedTextColor = TextPrimary,
+                  unfocusedTextColor = TextPrimary,
+                  focusedBorderColor = EmeraldPrimary,
+                  unfocusedBorderColor = SurfaceCardBorder
+                ),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true
+              )
+              OutlinedTextField(
+                value = newShortcutCommand,
+                onValueChange = { newShortcutCommand = it },
+                placeholder = { Text("အမိန့်စကား (ဥပမာ: မီးဖွင့်ပေး)", fontSize = 10.sp) },
+                modifier = Modifier.weight(1.2f),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedTextColor = TextPrimary,
+                  unfocusedTextColor = TextPrimary,
+                  focusedBorderColor = EmeraldPrimary,
+                  unfocusedBorderColor = SurfaceCardBorder
+                ),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true
+              )
+              Button(
+                onClick = {
+                  if (newShortcutTitle.isNotBlank() && newShortcutCommand.isNotBlank()) {
+                    onAddShortcut(newShortcutTitle, newShortcutCommand, "custom_voice")
+                    newShortcutTitle = ""
+                    newShortcutCommand = ""
+                  }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+              ) {
+                Text("ထည့်မည်", fontSize = 11.sp)
               }
             }
           }

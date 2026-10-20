@@ -78,9 +78,11 @@ fun MainScreen(
   val showMusicLibraryModal by viewModel.showMusicLibraryModal.collectAsState()
   val showAssetDiagnosticsModal by viewModel.showAssetDiagnosticsModal.collectAsState()
   val angelChatViewModel: AiAngelChatViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
-  val isBackgroundListening by viewModel.isBackgroundListening.collectAsState()
-  val ambientNoiseDb by viewModel.ambientNoiseDb.collectAsState()
-  val deviceLocation by viewModel.deviceLocation.collectAsState()
+  // Audit UI-4: isBackgroundListening / ambientNoiseDb / deviceLocation used
+  // to be collected here but never displayed or passed anywhere (dead
+  // reads). Removed; the ViewModel flows themselves remain available.
+  val soundEffectsEnabled by viewModel.soundEffectsEnabled.collectAsState()
+  val hapticFeedbackEnabled by viewModel.hapticFeedbackEnabled.collectAsState()
 
   // Kennede IR Smart Controller states
   val esp32Status by viewModel.esp32Status.collectAsState()
@@ -195,7 +197,6 @@ fun MainScreen(
             volumeLevel = volumeLevel,
             isNetworkAvailable = viewModel.isNetworkOnline(),
             isOfflineFallbackActive = isOfflineFallbackActive,
-            onToggleOfflineFallback = { viewModel.toggleOfflineFallback() },
             onMicClick = {
               if (!permissionHandler.permissionState.isMicrophoneGranted) {
                 showRuntimePermissionDialog = true
@@ -322,6 +323,10 @@ fun MainScreen(
           onRequestAllPermissions = { permissionHandler.requestAll() },
           onDismiss = { viewModel.showSettingsModal.value = false },
           onAddShortcut = { title, cmd, target -> viewModel.addCustomShortcut(title, cmd, target) },
+          soundEnabled = soundEffectsEnabled,
+          hapticEnabled = hapticFeedbackEnabled,
+          onSoundEnabledChange = { viewModel.setSoundEffectsEnabled(it) },
+          onHapticEnabledChange = { viewModel.setHapticFeedbackEnabled(it) },
           onDeleteShortcut = { id -> viewModel.deleteShortcut(id) },
           onSaveEcoFlowConfig = { ak, sk, sn, host -> viewModel.saveEcoFlowConfig(ak, sk, sn, host) },
           onRefreshContacts = { viewModel.refreshDeviceContacts() },

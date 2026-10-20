@@ -105,7 +105,12 @@ fun VoiceVisualizerArea(
   volumeLevel: Float,
   isNetworkAvailable: Boolean = true,
   isOfflineFallbackActive: Boolean = false,
-  onToggleOfflineFallback: () -> Unit = {},
+  // Audit UI-2: an onToggleOfflineFallback callback used to be declared here
+  // and wired by MainScreen, but nothing in this composable ever invoked it.
+  // isOfflineFallbackActive is a system STATUS (set by the ViewModel when
+  // recognition falls back), not a user preference — the real user control
+  // is Offline Mode in the status bar — so the dead callback was removed
+  // rather than wired to a switch that would itself have been decorative.
   onMicClick: () -> Unit,
   onSendCommand: (String) -> Unit = {},
   modifier: Modifier = Modifier
