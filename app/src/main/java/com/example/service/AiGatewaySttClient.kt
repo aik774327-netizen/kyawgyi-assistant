@@ -58,8 +58,8 @@ class AiGatewaySttClient(private val context: Context) {
     private const val TAG = "AiGatewaySttClient"
     // Audit finding #16: the previous hardcoded "http://10.0.2.2:3000" emulator loopback
     // was attempted on real devices (and is cleartext-blocked by the network security
-    // config anyway). The backend is now DISABLED by default; deploy app/api (see
-    // app/api/README.md) and call setBackendUrl() to enable it.
+    // config anyway). The backend is now DISABLED by default; deploy server/api (see
+    // server/README.md) and call setBackendUrl() to enable it.
     private const val DEFAULT_BACKEND_URL = ""
     private const val PREF_BACKEND_URL_OVERRIDE = "backend_url_override"
     private const val CACHE_PREFS = "ai_gateway_cache_prefs"
@@ -423,7 +423,7 @@ class AiGatewaySttClient(private val context: Context) {
   }
 
   /**
-   * Points the client at a self-hosted gateway (see app/api/README.md).
+   * Points the client at a self-hosted gateway (see server/README.md).
    * Pass "" to disable the backend tier entirely (default).
    */
   fun setBackendUrl(url: String) {
