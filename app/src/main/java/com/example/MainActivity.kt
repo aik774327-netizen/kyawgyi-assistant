@@ -80,6 +80,7 @@ import com.example.ui.components.PermissionSettingsDialog
 import com.example.ui.components.SettingsView
 import com.example.ui.components.TaskListView
 import com.example.ui.components.VisualProgressRingsCard
+import com.example.ui.dictation.DictationScreen
 import com.example.ui.shortcuts.CustomShortcutsScreen
 import com.example.ui.theme.AngelTheme
 import com.example.ui.urlcontrol.UrlControlScreen
@@ -307,6 +308,7 @@ fun MainAppDashboardScreen(
 
     var smartControlSubTab by remember { mutableIntStateOf(0) }
     var isChatboxOpen by remember { mutableStateOf(false) }
+    var isDictationOpen by remember { mutableStateOf(false) }
     var showOneClickDiagnosticsModal by remember { mutableStateOf(false) }
 
     if (isChatboxOpen) {
@@ -317,6 +319,13 @@ fun MainAppDashboardScreen(
                 isChatboxOpen = false
                 selectedTab = 4
             }
+        )
+        return
+    }
+
+    if (isDictationOpen) {
+        DictationScreen(
+            onBack = { isDictationOpen = false }
         )
         return
     }
@@ -465,6 +474,7 @@ fun MainAppDashboardScreen(
                     },
                     onNavigateToSettings = { selectedTab = 4 },
                     onNavigateToChatbox = { isChatboxOpen = true },
+                    onNavigateToDictation = { isDictationOpen = true },
                     onOpenDiagnosticsModal = { showOneClickDiagnosticsModal = true },
                     voicePermissionHelper = voicePermissionHelper,
                     permissionManager = permissionManager
@@ -565,6 +575,7 @@ fun DashboardHomeContent(
     onNavigateToUrlControls: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     onNavigateToChatbox: () -> Unit = {},
+    onNavigateToDictation: () -> Unit = {},
     onOpenDiagnosticsModal: () -> Unit = {},
     voicePermissionHelper: VoicePermissionHelper? = null,
     permissionManager: com.kyawgyi.ir.utils.PermissionManager? = null
@@ -807,6 +818,63 @@ fun DashboardHomeContent(
                     text = "ဖွင့်မည် >",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // Voice Typing (Dictation) Banner — native dictation screen
+        Card(
+            onClick = onNavigateToDictation,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("dashboard_dictation_banner"),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Voice Typing",
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = "အသံနဲ့ စာရိုက်ရန် (Voice Typing)",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            text = "မြန်မာအသံမှ စာသား • တည်းဖြတ်မှု • Auto-save • TXT ထုတ်ယူခြင်း",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+                Text(
+                    text = "ဖွင့်မည် >",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.tertiary,
                     fontWeight = FontWeight.Bold
                 )
             }
