@@ -116,7 +116,7 @@ class DictationSessionLogicTest {
         assertEquals(0, DictationText.countCharacters("   \n\t "))
         assertEquals(3, DictationText.countCharacters("a b c"))
         assertEquals(5, DictationText.countCharacters("hello"))
-        assertEquals(11, DictationText.countCharacters("hello world\nagain"))
+        assertEquals(15, DictationText.countCharacters("hello world\nagain"))
     }
 
     @Test
