@@ -28,7 +28,7 @@ import kotlin.math.max
  */
 data class SttStreamingUiState(
     val engineState: SttEngineState = SttEngineState.IDLE,
-    val activeEngineType: SttEngineType = SttEngineType.SHERPA_ONNX,
+    val activeEngineType: SttEngineType = SttEngineType.SYSTEM_ON_DEVICE,
     val isStreamingFromCaptureModule: Boolean = false,
     val isModelLoaded: Boolean = false,
     val partialTranscript: String = "",
@@ -49,15 +49,14 @@ data class SttStreamingUiState(
     val failoverSwitchCount: Int = 0,
     val bufferPoolHitRatioPercent: Float = 100f,
     val isCallPreempted: Boolean = false,
-    val ttsVoiceDataReady: Boolean = true,
+    val ttsVoiceDataReady: Boolean = false,
     val powerProfileLabel: String = VoicePowerProfile.BALANCED.displayLabel,
     val bargeInCount: Int = 0,
     val currentAgcGain: Float = 1.0f,
     val g2pRulesCount: Int = MyanmarPronunciationLexicon.ORTHOGRAPHY_TO_SPOKEN_G2P.size,
-    val requirements12ReadyCount: Int = 12,
     val persistedCustomLexiconsCount: Int = 0,
-    val lastLoopbackStatus: String = "READY",
-    val nativeBinarySummary: String = "Asset Structure Verified ✓",
+    val lastLoopbackStatus: String = "NOT RUN",
+    val nativeBinarySummary: String = "Not inspected yet",
     val lastErrorMessage: String? = null,
     val lastUpdatedTimestampMs: Long = 0L
 )
@@ -65,10 +64,10 @@ data class SttStreamingUiState(
 /**
  * SttEngineManager (Layer 2 Hybrid & Model-Based Streaming Speech-to-Text Manager)
  *
- * Coordinates streaming audio buffers from [AudioCaptureModule] to pluggable model-based ASR engines:
- * - Sherpa-ONNX Zipformer (Primary Offline Model-Based Transducer)
- * - Vosk Small Myanmar Model (Secondary Offline Kaldi Fallback)
- * - System On-Device ASR (OS Fallback)
+ * Coordinates streaming audio buffers from [AudioCaptureModule] to the Android
+ * System On-Device ASR engine. The former Sherpa-ONNX and Vosk tiers were
+ * heuristic fakes with no real model or native library and were removed in
+ * the 2026-10-22 fake-data removal pass.
  *
  * Guarantees thread-safe [StateFlow] updates (`engineState` and `uiState`) using atomic CAS
  * (`MutableStateFlow.update`) and serialized coroutine stream dispatchers.
@@ -125,8 +124,6 @@ class SttEngineManager(
     )
     val transcriptionFlow: SharedFlow<Pair<String, Boolean>> = _transcriptionFlow.asSharedFlow()
 
-    val sherpaEngine = SherpaOnnxSttEngine(context, modelManager)
-    val voskEngine = VoskSttEngine(context, modelManager)
     val systemEngine = SystemOnDeviceSttEngine(context)
 
     @Volatile
@@ -162,19 +159,12 @@ class SttEngineManager(
     }
 
     init {
-        NativeLibraryLoader.loadSherpaOnnx()
-        NativeLibraryLoader.loadVosk()
         telephonyPreemptionManager.registerCallStateListener()
 
-        // Auto-select best available engine based on storage presence
-        activeEngine = if (modelManager.isSherpaOnnxModelAvailable()) {
-            sherpaEngine
-        } else if (modelManager.isVoskModelAvailable()) {
-            voskEngine
-        } else {
-            Log.i(TAG, "Local offline models not present on disk; defaulting to SystemOnDeviceSttEngine.")
-            systemEngine
-        }
+        // The Android system recognizer is the only real STT engine in this app.
+        // (The Sherpa-ONNX/Vosk tiers and their placeholder models were removed
+        // in the 2026-10-22 fake-data removal pass.)
+        activeEngine = systemEngine
 
         // Populate Myanmar cities, townships, honorifics & contacts into HotwordBiasing
         ProperNounHotwordDataset.populateHotwordBiasing(context, hotwordBiasing)
@@ -195,8 +185,6 @@ class SttEngineManager(
         }
 
         // Wire engine transcript callbacks to thread-safe StateFlow updater
-        sherpaEngine.setTranscriptListener { text, isFinal -> onEngineTranscriptReceived(text, isFinal) }
-        voskEngine.setTranscriptListener { text, isFinal -> onEngineTranscriptReceived(text, isFinal) }
         systemEngine.setTranscriptListener { text, isFinal -> onEngineTranscriptReceived(text, isFinal) }
 
         syncUiStateWithActiveEngine()
@@ -204,11 +192,7 @@ class SttEngineManager(
 
     private fun syncUiStateWithActiveEngine() {
         val currentType = activeEngine?.engineType ?: SttEngineType.SYSTEM_ON_DEVICE
-        val modelReady = when (currentType) {
-            SttEngineType.SHERPA_ONNX -> modelManager.isSherpaOnnxModelAvailable()
-            SttEngineType.VOSK -> modelManager.isVoskModelAvailable()
-            SttEngineType.SYSTEM_ON_DEVICE -> systemEngine.isRecognitionAvailable()
-        }
+        val modelReady = systemEngine.isRecognitionAvailable()
         _uiState.update { current ->
             current.copy(
                 activeEngineType = currentType,
@@ -223,11 +207,8 @@ class SttEngineManager(
             val old = activeEngine
             old?.stopListening()
 
-            activeEngine = when (type) {
-                SttEngineType.SHERPA_ONNX -> sherpaEngine
-                SttEngineType.VOSK -> voskEngine
-                SttEngineType.SYSTEM_ON_DEVICE -> systemEngine
-            }
+            // SYSTEM_ON_DEVICE is the only engine type that exists.
+            activeEngine = systemEngine
             Log.i(TAG, "Switched active STT Engine to: ${activeEngine?.engineType}")
             syncUiStateWithActiveEngine()
         }
@@ -237,8 +218,8 @@ class SttEngineManager(
         Log.i(TAG, "SttEngineManager starting listening session (active=${activeEngine?.engineType})...")
         setEngineStateThreadSafe(SttEngineState.LISTENING)
         activeEngine?.startListening()
-        // When Sherpa-ONNX or Vosk is active on a live device without native JNI .so loaded,
-        // co-activate SystemOnDeviceSttEngine so live microphone speech still produces real Burmese transcripts
+        // Defensive: if the active engine were ever not the system engine,
+        // co-activate it so live microphone speech still produces real transcripts.
         if (activeEngine != systemEngine && systemEngine.isRecognitionAvailable()) {
             systemEngine.startListening()
         }
@@ -264,13 +245,12 @@ class SttEngineManager(
     }
 
     /**
-     * Connects [AudioCaptureModule.audioBufferFlow] directly to the model-based STT engine
-     * ([SherpaOnnxSttEngine] or [VoskSttEngine]) on a background coroutine and performs
-     * lock-free, thread-safe [StateFlow] updates for the UI.
+     * Connects [AudioCaptureModule.audioBufferFlow] directly to the system STT engine
+     * on a background coroutine and performs lock-free, thread-safe [StateFlow]
+     * updates for the UI.
      */
     fun startAudioCaptureStreaming(
-        captureModule: AudioCaptureModule = this.audioCaptureModule,
-        preferSherpaModelEngine: Boolean = true
+        captureModule: AudioCaptureModule = this.audioCaptureModule
     ) {
         managerScope.launch {
             streamingMutex.withLock {
@@ -278,10 +258,6 @@ class SttEngineManager(
                     Log.d(TAG, "AudioCaptureModule streaming is already active.")
                     return@withLock
                 }
-                if (preferSherpaModelEngine && activeEngine?.engineType == SttEngineType.SYSTEM_ON_DEVICE) {
-                    selectEngine(SttEngineType.SHERPA_ONNX)
-                }
-
                 startListening()
                 isCaptureStreamingActive.set(true)
                 _uiState.update { current ->
@@ -358,9 +334,9 @@ class SttEngineManager(
     }
 
     /**
-     * Routes a pre-normalized [AudioBufferPacket] from [AudioCaptureModule] to the active
-     * model-based STT engine (using `acceptWaveform` for [SherpaOnnxSttEngine] or `processAudio`
-     * for [VoskSttEngine]) and performs an atomic [StateFlow] update for the UI.
+     * Routes a pre-normalized [AudioBufferPacket] from [AudioCaptureModule] to the
+     * active STT engine via `processAudio` and performs an atomic [StateFlow]
+     * update for the UI.
      */
     fun streamAudioBufferPacket(packet: AudioBufferPacket) {
         if (_engineState.value != SttEngineState.LISTENING && _engineState.value != SttEngineState.PROCESSING) {
@@ -400,37 +376,12 @@ class SttEngineManager(
             val preRollBytes = audioCaptureModule.preRollRingBuffer.drainPreRollBytes()
             if (preRollBytes.isNotEmpty()) {
                 totalPreRollFlushedBytes.addAndGet(preRollBytes.size.toLong())
-                when (engine) {
-                    is SherpaOnnxSttEngine -> {
-                        val preRollPacket = AudioCaptureModule.buildPacketFromPcm(preRollBytes, 0L, packet.sampleRateHz)
-                        engine.acceptWaveform(
-                            samples = preRollPacket.normalizedFloatSamples,
-                            sampleRate = packet.sampleRateHz,
-                            emitStreamingHypothesis = false
-                        )
-                    }
-                    else -> engine?.processAudio(preRollBytes)
-                }
+                engine?.processAudio(preRollBytes)
             }
         }
 
-        when (engine) {
-            is SherpaOnnxSttEngine -> {
-                engine.acceptWaveform(
-                    samples = packet.normalizedFloatSamples,
-                    sampleRate = packet.sampleRateHz,
-                    emitStreamingHypothesis = true
-                )
-            }
-            else -> {
-                engine?.processAudio(packet.pcmBytes)
-            }
-        }
-        val latencyMs = if (engine is SherpaOnnxSttEngine && engine.lastInferenceLatencyMs > 0.0) {
-            engine.lastInferenceLatencyMs
-        } else {
-            (System.nanoTime() - startNs) / 1_000_000.0
-        }
+        engine?.processAudio(packet.pcmBytes)
+        val latencyMs = (System.nanoTime() - startNs) / 1_000_000.0
 
         val chunks = totalStreamedChunks.incrementAndGet()
         val bytes = totalStreamedBytes.addAndGet(packet.pcmBytes.size.toLong())
@@ -510,62 +461,6 @@ class SttEngineManager(
     }
 
     /**
-     * Runs an end-to-end streaming buffer simulation from [AudioCaptureModule] to [SherpaOnnxSttEngine]
-     * so users and diagnostics can verify real-time 16kHz PCM buffer streaming, partial token decoding,
-     * and thread-safe [StateFlow] updates on the UI.
-     */
-    fun simulateAudioCaptureToSherpaStream(
-        utteranceHint: String = "မင်္ဂလာပါ ကျော်ကြီး ဒီနေ့ ရာသီဥတု ဘယ်လိုရှိလဲ"
-    ) {
-        managerScope.launch {
-            streamingMutex.withLock {
-                selectEngine(SttEngineType.SHERPA_ONNX)
-                sherpaEngine.setStreamingHypothesisHint(utteranceHint)
-                startListening()
-                _uiState.update { current ->
-                    current.copy(
-                        isStreamingFromCaptureModule = true,
-                        engineState = SttEngineState.LISTENING,
-                        partialTranscript = "",
-                        lastErrorMessage = null,
-                        lastUpdatedTimestampMs = System.currentTimeMillis()
-                    )
-                }
-
-                val tokenCount = utteranceHint.trim().split(Regex("\\s+")).size
-                val speechFrames = maxOf(tokenCount * 2, 8)
-                for (i in 0 until speechFrames) {
-                    val pcm = AudioCaptureModule.generateSpeechHarmonicPcmFrame(
-                        frameIndex = i,
-                        amplitude = 4600 + (i % 3) * 550,
-                        fundamentalFreqHz = 160.0 + (i % 4) * 10.0
-                    )
-                    val packet = audioCaptureModule.emitAudioBuffer(pcm)
-                    streamAudioBufferPacket(packet)
-                    kotlinx.coroutines.delay(35L)
-                }
-
-                val silencePcm = ByteArray(AudioCaptureModule.DEFAULT_FRAME_BYTES)
-                for (j in 0 until 4) {
-                    val packet = audioCaptureModule.emitAudioBuffer(silencePcm)
-                    streamAudioBufferPacket(packet)
-                    kotlinx.coroutines.delay(25L)
-                }
-
-                _uiState.update { current ->
-                    current.copy(
-                        isStreamingFromCaptureModule = false,
-                        engineState = SttEngineState.IDLE,
-                        isSpeechActive = false,
-                        lastUpdatedTimestampMs = System.currentTimeMillis()
-                    )
-                }
-                setEngineStateThreadSafe(SttEngineState.IDLE)
-            }
-        }
-    }
-
-    /**
      * Triggers the 3-Second Mic Check & Playback Loopback diagnostic asynchronously and updates [uiState].
      */
     fun triggerThreeSecondMicLoopbackCheck(durationMs: Int = 3000) {
@@ -634,14 +529,10 @@ class SttEngineManager(
     data class SttEngineHealthReport(
         val activeEngineType: SttEngineType,
         val engineState: SttEngineState,
-        val isSherpaModelReady: Boolean,
-        val isVoskModelReady: Boolean,
         val isSystemSttAvailable: Boolean,
         val lastPartialTranscript: String,
         val lastFinalTranscript: String,
         val totalUtterancesProcessed: Int,
-        val sherpaProcessedChunks: Long,
-        val voskProcessedChunks: Long,
         val totalStreamedChunks: Long = 0L,
         val totalStreamedBytes: Long = 0L,
         val lastRmsDbFs: Float = -90f,
@@ -653,14 +544,10 @@ class SttEngineManager(
         return SttEngineHealthReport(
             activeEngineType = activeEngine?.engineType ?: SttEngineType.SYSTEM_ON_DEVICE,
             engineState = _engineState.value,
-            isSherpaModelReady = modelManager.isSherpaOnnxModelAvailable(),
-            isVoskModelReady = modelManager.isVoskModelAvailable(),
             isSystemSttAvailable = systemEngine.isRecognitionAvailable(),
             lastPartialTranscript = lastPartialTranscript,
             lastFinalTranscript = lastFinalTranscript,
             totalUtterancesProcessed = totalFinalUtterances.get(),
-            sherpaProcessedChunks = sherpaEngine.processedChunksCount,
-            voskProcessedChunks = voskEngine.processedChunksCount,
             totalStreamedChunks = totalStreamedChunks.get(),
             totalStreamedBytes = totalStreamedBytes.get(),
             lastRmsDbFs = snapshot.currentRmsDbFs,
@@ -669,21 +556,15 @@ class SttEngineManager(
     }
 
     /**
-     * Automatically cascades to the next available tier if the current offline model is missing:
-     * Tier 1: SHERPA_ONNX -> Tier 2: VOSK -> Tier 3: SYSTEM_ON_DEVICE
+     * Ensures the active engine is the Android system recognizer — the only
+     * real STT engine in this app (the Sherpa-ONNX/Vosk tiers were removed).
      */
     @Synchronized
     fun ensureHealthyEngineSelected(): SttEngineType {
-        val currentType = activeEngine?.engineType
-        if (currentType == SttEngineType.SHERPA_ONNX && !modelManager.isSherpaOnnxModelAvailable()) {
-            val nextType = if (modelManager.isVoskModelAvailable()) SttEngineType.VOSK else SttEngineType.SYSTEM_ON_DEVICE
-            Log.w(TAG, "Sherpa-ONNX model missing on disk; cascading fallback to $nextType")
-            selectEngine(nextType)
-        } else if (currentType == SttEngineType.VOSK && !modelManager.isVoskModelAvailable()) {
-            Log.w(TAG, "Vosk model missing on disk; cascading fallback to SYSTEM_ON_DEVICE")
+        if (activeEngine?.engineType != SttEngineType.SYSTEM_ON_DEVICE) {
             selectEngine(SttEngineType.SYSTEM_ON_DEVICE)
         }
-        return activeEngine?.engineType ?: SttEngineType.SYSTEM_ON_DEVICE
+        return SttEngineType.SYSTEM_ON_DEVICE
     }
 
     fun finalizeCurrentUtterance() {
@@ -704,7 +585,7 @@ class SttEngineManager(
      */
     @Synchronized
     fun recordEngineFailureAndFailover(reason: String): SttEngineType {
-        val currentType = activeEngine?.engineType ?: SttEngineType.SHERPA_ONNX
+        val currentType = activeEngine?.engineType ?: SttEngineType.SYSTEM_ON_DEVICE
         val nextType = dualSttFailover.onEngineFailure(
             failedEngine = currentType,
             reason = reason,
@@ -727,7 +608,7 @@ class SttEngineManager(
         val biased = hotwordBiasing.applyHotwordBiasToTranscript(homophoneFixed)
         lastPartialTranscript = biased
         if (isFinal) {
-            val currentType = activeEngine?.engineType ?: SttEngineType.SHERPA_ONNX
+            val currentType = activeEngine?.engineType ?: SttEngineType.SYSTEM_ON_DEVICE
             dualSttFailover.onUtteranceSucceeded(currentType)
             val normalizedFinal = codeSwitchNormalizer.normalizeSttTranscript(biased)
             lastFinalTranscript = normalizedFinal
@@ -759,8 +640,6 @@ class SttEngineManager(
         captureStreamJob?.cancel()
         captureStreamJob = null
         stopListening()
-        sherpaEngine.release()
-        voskEngine.release()
         systemEngine.release()
     }
 }

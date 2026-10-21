@@ -68,7 +68,7 @@ class NativeLibraryLoader {
                 Log.i(TAG, "Vosk Native Shared Library (libvosk.so) Loaded Successfully.")
                 true
             } catch (e: UnsatisfiedLinkError) {
-                Log.i(TAG, "Vosk native .so not bundled in jniLibs yet; using VoskDirectPcmRecognizer (${e.message}).")
+                Log.i(TAG, "Vosk native .so not bundled in jniLibs; Vosk engine unavailable (${e.message}).")
                 false
             }
         }
@@ -94,17 +94,19 @@ class NativeLibraryLoader {
         }
 
         fun inspectStatus(context: Context): NativeAndModelBinaryStatus {
-            val sherpaReady = hasAsset(context, "models/myanmar/encoder.onnx")
-            val ttsReady = hasAsset(context, "models/tts-myanmar/vocab.txt")
-            val vadReady = hasAsset(context, "models/vad/silero_vad.onnx")
-            val kwsReady = hasAsset(context, "models/kws/kws-hey-kyawgyi.onnx")
-            val voskReady = hasAsset(context, "models/vosk-model-small-my/graph/words.txt")
+            // Readiness means a *usable* model file (>= 1 KB of real content),
+            // not merely a file with the right name. The former text-placeholder
+            // asset files were deleted on 2026-10-22, so these checks now
+            // truthfully report false for the offline STT/TTS/KWS models.
+            val sherpaReady = hasUsableAsset(context, "models/myanmar/encoder.onnx")
+            val ttsReady = hasUsableAsset(context, "models/tts-myanmar/model.onnx")
+            val vadReady = hasUsableAsset(context, "models/vad/silero_vad.onnx")
+            val kwsReady = hasUsableAsset(context, "models/kws/kws-hey-kyawgyi.onnx")
+            val voskReady = hasUsableAsset(context, "models/vosk-model-small-my/am/final.mdl")
 
-            val summary = if (isSherpaJniLoaded) {
-                "Native JNI (.so) + ONNX Assets Active ✓"
-            } else {
-                "Asset Structure (Items 6–10) Verified ✓ (Hybrid Fallback Active)"
-            }
+            // Factual summary only — no "Verified" claims for states that
+            // were never actually verified.
+            val summary = "Native JNI loaded: onnxruntime=$isOnnxRuntimeLoaded, sherpa=$isSherpaJniLoaded, vosk=$isVoskJniLoaded; usable model assets: sherpa=$sherpaReady, tts=$ttsReady, vad=$vadReady, kws=$kwsReady, vosk=$voskReady"
 
             return NativeAndModelBinaryStatus(
                 isOnnxRuntimeLoaded = isOnnxRuntimeLoaded,
@@ -119,9 +121,19 @@ class NativeLibraryLoader {
             )
         }
 
-        private fun hasAsset(context: Context, relativePath: String): Boolean =
+        private fun hasUsableAsset(context: Context, relativePath: String): Boolean =
             runCatching {
-                context.assets.open(relativePath).use { true }
+                context.assets.open(relativePath).use { input ->
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        total += read
+                        if (total >= 1024L) return@use true
+                    }
+                    total >= 1024L
+                }
             }.getOrDefault(false)
     }
 }

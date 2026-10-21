@@ -10,9 +10,9 @@ import kotlinx.coroutines.flow.update
  * Snapshot of [DualSttFailover] routing and failover telemetry.
  */
 data class DualSttFailoverState(
-    val primaryEngine: SttEngineType = SttEngineType.SHERPA_ONNX,
-    val secondaryEngine: SttEngineType = SttEngineType.VOSK,
-    val activeEngine: SttEngineType = SttEngineType.SHERPA_ONNX,
+    val primaryEngine: SttEngineType = SttEngineType.SYSTEM_ON_DEVICE,
+    val secondaryEngine: SttEngineType = SttEngineType.SYSTEM_ON_DEVICE,
+    val activeEngine: SttEngineType = SttEngineType.SYSTEM_ON_DEVICE,
     val failoverSwitchCount: Int = 0,
     val consecutiveEmptySpeechResults: Int = 0,
     val lastFailoverReason: String? = null,
@@ -22,10 +22,10 @@ data class DualSttFailoverState(
 /**
  * DualSttFailover (Requirements 12 — Automatic Dual-Engine STT Failover Coordinator)
  *
- * Coordinates seamless runtime failover across:
- * - Tier 1: [SttEngineType.SHERPA_ONNX] (Primary Offline Neural Zipformer)
- * - Tier 2: [SttEngineType.VOSK] (Secondary Offline Kaldi Recognizer)
- * - Tier 3: [SttEngineType.SYSTEM_ON_DEVICE] (OS SpeechRecognizer Fallback)
+ * Tracks STT engine health/failure state. Only [SttEngineType.SYSTEM_ON_DEVICE]
+ * exists now — the Sherpa-ONNX and Vosk tiers were heuristic fakes and were
+ * removed in the 2026-10-22 fake-data removal pass, so "failover" resolves to
+ * the system recognizer; the FailureMemory bookkeeping is retained.
  *
  * Consults [FailureMemory] and monitors consecutive empty/failed recognitions during active
  * speech frames to switch engines without losing user utterances.
@@ -52,29 +52,19 @@ class DualSttFailover(
         isSystemAvailable: Boolean = true,
         nowMs: Long = System.currentTimeMillis()
     ): SttEngineType {
-        val orderedCandidates = buildList {
-            add(preferred)
-            if (preferred != SttEngineType.SHERPA_ONNX) add(SttEngineType.SHERPA_ONNX)
-            if (preferred != SttEngineType.VOSK) add(SttEngineType.VOSK)
-            if (preferred != SttEngineType.SYSTEM_ON_DEVICE) add(SttEngineType.SYSTEM_ON_DEVICE)
-        }
+        // SYSTEM_ON_DEVICE is the only engine type that exists.
+        val orderedCandidates = listOf(SttEngineType.SYSTEM_ON_DEVICE)
 
         for (candidate in orderedCandidates) {
-            val isInstalled = when (candidate) {
-                SttEngineType.SHERPA_ONNX -> modelManager.isSherpaOnnxModelAvailable()
-                SttEngineType.VOSK -> modelManager.isVoskModelAvailable()
-                SttEngineType.SYSTEM_ON_DEVICE -> isSystemAvailable
-            }
+            val isInstalled = isSystemAvailable
             if (isInstalled && failureMemory.isEngineHealthy(candidate.name, nowMs)) {
                 _state.update { it.copy(activeEngine = candidate) }
                 return candidate
             }
         }
 
-        // If offline model binaries aren't installed yet, still allow preferred model engine in hybrid/stream mode
-        // if it hasn't been quarantined by runtime failures.
-        if (failureMemory.isEngineHealthy(preferred.name, nowMs)) {
-            return preferred
+        if (failureMemory.isEngineHealthy(SttEngineType.SYSTEM_ON_DEVICE.name, nowMs)) {
+            return SttEngineType.SYSTEM_ON_DEVICE
         }
 
         val fallback = failureMemory.filterHealthyEngines(orderedCandidates, nowMs).first()
@@ -151,20 +141,11 @@ class DualSttFailover(
         isSystemAvailable: Boolean,
         nowMs: Long
     ): SttEngineType {
-        val chain = when (failedEngine) {
-            SttEngineType.SHERPA_ONNX -> listOf(SttEngineType.VOSK, SttEngineType.SYSTEM_ON_DEVICE)
-            SttEngineType.VOSK -> listOf(SttEngineType.SHERPA_ONNX, SttEngineType.SYSTEM_ON_DEVICE)
-            SttEngineType.SYSTEM_ON_DEVICE -> listOf(SttEngineType.SHERPA_ONNX, SttEngineType.VOSK)
-        }
-        for (candidate in chain) {
-            if (!failureMemory.isEngineHealthy(candidate.name, nowMs)) continue
-            val usable = when (candidate) {
-                SttEngineType.SHERPA_ONNX -> modelManager.isSherpaOnnxModelAvailable()
-                SttEngineType.VOSK -> modelManager.isVoskModelAvailable()
-                SttEngineType.SYSTEM_ON_DEVICE -> isSystemAvailable
-            }
-            if (usable) return candidate
-        }
-        return failureMemory.filterHealthyEngines(chain, nowMs).firstOrNull() ?: SttEngineType.SYSTEM_ON_DEVICE
+        // No other engine exists to fail over to; the system recognizer is
+        // always the resolution. Failure bookkeeping above still records the
+        // failure honestly.
+        @Suppress("UNUSED_EXPRESSION")
+        run { failedEngine; isSystemAvailable; nowMs }
+        return SttEngineType.SYSTEM_ON_DEVICE
     }
 }

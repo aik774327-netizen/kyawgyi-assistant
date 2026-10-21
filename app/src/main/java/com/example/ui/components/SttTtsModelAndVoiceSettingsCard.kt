@@ -20,10 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.audit.ErrorLearningWorkflowEngine
 import com.example.ui.theme.*
-import com.kyawgyi.voice.ModelDownloader
-import com.kyawgyi.voice.ModelManager
 import com.kyawgyi.voice.SttEngineManager
 import com.kyawgyi.voice.SttEngineType
 import com.kyawgyi.voice.VoiceSettings
@@ -32,9 +29,9 @@ import java.util.Locale
 /**
  * SttTtsModelAndVoiceSettingsCard
  *
- * Connects the Layer 2 & Layer 3 STT/TTS Offline Model Downloader (`ModelDownloader`, `ModelManager`),
- * Pluggable STT Engine Selector (`SttEngineManager`), and persistent `VoiceSettings`
- * directly into the user-facing Jetpack Compose UI.
+ * Shows the honest STT engine status (Android System ASR only - the former
+ * Sherpa-ONNX/Vosk offline tiers were heuristic fakes and their placeholder
+ * model files were removed on 2026-10-22) and the persistent `VoiceSettings`.
  */
 @Composable
 fun SttTtsModelAndVoiceSettingsCard(
@@ -42,35 +39,20 @@ fun SttTtsModelAndVoiceSettingsCard(
 ) {
     val context = LocalContext.current
     val voiceSettings = remember { VoiceSettings.getInstance(context) }
-    val modelDownloader = remember { ModelDownloader.getInstance(context) }
-    val modelManager = remember { ModelManager(context) }
     val sttEngineManager = remember { SttEngineManager.getInstance(context) }
 
     val preferredEngine by voiceSettings.preferredSttEngineFlow.collectAsState()
     val ttsSpeechRate by voiceSettings.ttsSpeechRateFlow.collectAsState()
     val ttsPitch by voiceSettings.ttsPitchFlow.collectAsState()
-    val autoDownloadModels by voiceSettings.autoDownloadModelsFlow.collectAsState()
     val isAecHangoverEnabled by voiceSettings.isAecHangoverEnabledFlow.collectAsState()
     val useLocalTtsFallback by voiceSettings.useLocalTtsFallbackFlow.collectAsState()
 
-    val downloadState by modelDownloader.downloadState.collectAsState()
-
-    var isSherpaAvailable by remember { mutableStateOf(modelManager.isSherpaOnnxModelAvailable()) }
-    var isVoskAvailable by remember { mutableStateOf(modelManager.isVoskModelAvailable()) }
-
-    fun refreshModelAvailability() {
-        isSherpaAvailable = modelManager.isSherpaOnnxModelAvailable()
-        isVoskAvailable = modelManager.isVoskModelAvailable()
+    var isSystemSttAvailable by remember {
+        mutableStateOf(sttEngineManager.systemEngine.isRecognitionAvailable())
     }
 
-    LaunchedEffect(downloadState) {
-        refreshModelAvailability()
-        if (downloadState is ModelDownloader.DownloadState.Completed) {
-            // Re-evaluate any blocked RESOURCE_UNAVAILABLE_ERROR actions now that models exist on disk
-            ErrorLearningWorkflowEngine.blockedMethodsFlow.value.keys.toList().forEach { key ->
-                ErrorLearningWorkflowEngine.evaluateRequestedAction(key, context = context)
-            }
-        }
+    fun refreshModelAvailability() {
+        isSystemSttAvailable = sttEngineManager.systemEngine.isRecognitionAvailable()
     }
 
     Surface(
@@ -105,8 +87,8 @@ fun SttTtsModelAndVoiceSettingsCard(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Default.CloudDownload,
-                                contentDescription = "Offline STT/TTS Models",
+                                imageVector = Icons.Default.SettingsVoice,
+                                contentDescription = "STT/TTS Settings",
                                 tint = AngelNeonGreen,
                                 modifier = Modifier.size(22.dp)
                             )
@@ -121,7 +103,7 @@ fun SttTtsModelAndVoiceSettingsCard(
                             color = Color.White
                         )
                         Text(
-                            text = "Sherpa-ONNX • Vosk • AEC Echo Guard • F5/Local TTS",
+                            text = "System ASR • AEC Echo Guard • Local TTS",
                             fontSize = 11.sp,
                             color = AngelNeonGreen
                         )
@@ -144,7 +126,7 @@ fun SttTtsModelAndVoiceSettingsCard(
                 }
             }
 
-            // 1. On-Device Model Availability Status Badges
+            // 1. STT Engine Availability Status (honest: system recognizer only)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -154,24 +136,24 @@ fun SttTtsModelAndVoiceSettingsCard(
                     color = AngelSurfaceDark,
                     border = BorderStroke(
                         1.dp,
-                        if (isSherpaAvailable) Color(0xFF10B981).copy(alpha = 0.5f)
+                        if (isSystemSttAvailable) Color(0xFF10B981).copy(alpha = 0.5f)
                         else Color.White.copy(alpha = 0.1f)
                     ),
                     modifier = Modifier
                         .weight(1f)
-                        .testTag("sherpa_model_status_box")
+                        .testTag("system_stt_status_box")
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = if (isSherpaAvailable) Icons.Default.CheckCircle else Icons.Default.DownloadForOffline,
+                                imageVector = if (isSystemSttAvailable) Icons.Default.CheckCircle else Icons.Default.Error,
                                 contentDescription = null,
-                                tint = if (isSherpaAvailable) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                tint = if (isSystemSttAvailable) Color(0xFF10B981) else Color(0xFFEF4444),
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Sherpa-ONNX",
+                                text = "Android System STT",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -179,212 +161,57 @@ fun SttTtsModelAndVoiceSettingsCard(
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (isSherpaAvailable) "စက်တွင်း အဆင်သင့်ရှိသည်" else "ဒေါင်းလုဒ် ရယူရန်လိုသည်",
+                            text = if (isSystemSttAvailable) "စက်တွင်း အဆင်သင့်ရှိသည်" else "SpeechRecognizer မရနိုင်ပါ",
                             fontSize = 10.sp,
-                            color = if (isSherpaAvailable) Color(0xFF10B981) else AngelTextSecondary
-                        )
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = AngelSurfaceDark,
-                    border = BorderStroke(
-                        1.dp,
-                        if (isVoskAvailable) Color(0xFF10B981).copy(alpha = 0.5f)
-                        else Color.White.copy(alpha = 0.1f)
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("vosk_model_status_box")
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (isVoskAvailable) Icons.Default.CheckCircle else Icons.Default.DownloadForOffline,
-                                contentDescription = null,
-                                tint = if (isVoskAvailable) Color(0xFF10B981) else Color(0xFFF59E0B),
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Vosk Myanmar",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = if (isVoskAvailable) "စက်တွင်း အဆင်သင့်ရှိသည်" else "ဒေါင်းလုဒ် ရယူရန်လိုသည်",
-                            fontSize = 10.sp,
-                            color = if (isVoskAvailable) Color(0xFF10B981) else AngelTextSecondary
+                            color = if (isSystemSttAvailable) Color(0xFF10B981) else AngelTextSecondary
                         )
                     }
                 }
             }
 
-            // 2. Offline Model Downloader Progress & Action Controls
+            // 2. Offline models: none exist - state that plainly instead of
+            // offering downloads of models that were never real.
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = AngelSurfaceDark,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("offline_models_removed_note")
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "အော့ဖ်လိုင်း မြန်မာအသံမော်ဒယ် ဒေါင်းလုဒ်စနစ် (ModelDownloader)",
+                        text = "အော့ဖ်လိုင်း STT မော်ဒယ် မရှိပါ",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-
-                    when (val state = downloadState) {
-                        is ModelDownloader.DownloadState.Idle -> {
-                            Text(
-                                text = "Sherpa-ONNX Zipformer မြန်မာမော်ဒယ်ဖိုင်အား စက်တွင်းသို့ ဒေါင်းလုဒ်ရယူနိုင်ပါသည်။",
-                                fontSize = 11.sp,
-                                color = AngelTextSecondary
-                            )
-                        }
-
-                        is ModelDownloader.DownloadState.Downloading -> {
-                            val progressFraction = if (state.progressPercent in 0..100) {
-                                state.progressPercent / 100f
-                            } else 0f
-                            Text(
-                                text = "ဒေါင်းလုဒ်ဆွဲနေသည်: ${state.progressPercent.coerceAtLeast(0)}% (${state.bytesDownloaded / 1024} KB)",
-                                fontSize = 11.sp,
-                                color = AngelCyanAccent,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.testTag("model_download_progress_text")
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            LinearProgressIndicator(
-                                progress = { progressFraction },
-                                modifier = Modifier.fillMaxWidth(),
-                                color = AngelNeonGreen
-                            )
-                        }
-
-                        is ModelDownloader.DownloadState.Extracting -> {
-                            Text(
-                                text = "Zip ဖိုင်ဖြည်နေသည် (ZipSlip Guard): ${state.currentEntry}",
-                                fontSize = 11.sp,
-                                color = AngelNeonGreen
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            LinearProgressIndicator(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = AngelNeonGreen
-                            )
-                        }
-
-                        is ModelDownloader.DownloadState.Completed -> {
-                            Text(
-                                text = "✓ ${state.message}",
-                                fontSize = 11.sp,
-                                color = Color(0xFF10B981),
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.testTag("model_download_completed_text")
-                            )
-                        }
-
-                        is ModelDownloader.DownloadState.Failed -> {
-                            Text(
-                                text = "⚠ ${state.errorReason}",
-                                fontSize = 11.sp,
-                                color = Color(0xFFEF4444),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.testTag("model_download_failed_text")
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Text(
+                        text = "Sherpa-ONNX / Vosk မြန်မာ အော့ဖ်လိုင်း မော်ဒယ် အမှန်တကယ် မရှိပါ — ယခင် placeholder ဖိုင်များကို ဖယ်ရှားထားပြီးဖြစ်၍ Android System SpeechRecognizer ကိုသာ အသုံးပြုပါသည်။",
+                        fontSize = 11.sp,
+                        color = AngelTextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { refreshModelAvailability() },
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("refresh_model_status_btn"),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AngelCyanAccent),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        val isBusy = downloadState is ModelDownloader.DownloadState.Downloading ||
-                            downloadState is ModelDownloader.DownloadState.Extracting
-
-                        Button(
-                            onClick = {
-                                modelDownloader.startDownload { success ->
-                                    refreshModelAvailability()
-                                    if (!success) {
-                                        val failState = modelDownloader.downloadState.value
-                                        val errReason = (failState as? ModelDownloader.DownloadState.Failed)?.errorReason
-                                            ?: "Model download failed"
-                                        ErrorLearningWorkflowEngine.recordErrorLog(
-                                            task = "Download Offline Myanmar Speech Model",
-                                            commandKey = "download_sherpa_model",
-                                            expectedResult = "Download and extract Sherpa-ONNX model archive to internal storage",
-                                            actualResult = "Download failed: $errReason",
-                                            attemptedMethod = "ModelDownloader.startDownload",
-                                            evidence = errReason
-                                        )
-                                    }
-                                }
-                            },
-                            enabled = !isBusy,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                                .testTag("start_model_download_btn"),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = AngelNeonGreen,
-                                contentColor = Color.Black
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "မော်ဒယ် ဒေါင်းလုဒ်ဆွဲမည်",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        if (isBusy) {
-                            OutlinedButton(
-                                onClick = { modelDownloader.cancelDownload() },
-                                modifier = Modifier
-                                    .height(38.dp)
-                                    .testTag("cancel_model_download_btn"),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("ရပ်မည်", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { refreshModelAvailability() },
-                                modifier = Modifier
-                                    .height(38.dp)
-                                    .testTag("refresh_model_status_btn"),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AngelCyanAccent),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh Model Status",
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh STT Status",
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("အခြေအနေ ပြန်စစ်မည်", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
-            // 3. Preferred STT Engine Selection (Sherpa-ONNX / Vosk / System On-Device)
+            // 3. Preferred STT Engine Selection (System On-Device only)
             Text(
                 text = "ဦးစားပေး အသံဖမ်း အင်ဂျင် ရွေးချယ်ရန် (Preferred STT Engine):",
                 fontSize = 12.sp,
@@ -399,8 +226,6 @@ fun SttTtsModelAndVoiceSettingsCard(
                 SttEngineType.entries.forEach { engineType ->
                     val isSelected = preferredEngine == engineType
                     val label = when (engineType) {
-                        SttEngineType.SHERPA_ONNX -> "Sherpa-ONNX"
-                        SttEngineType.VOSK -> "Vosk Offline"
                         SttEngineType.SYSTEM_ON_DEVICE -> "System ASR"
                     }
                     Surface(
@@ -494,15 +319,7 @@ fun SttTtsModelAndVoiceSettingsCard(
                 )
             }
 
-            // 5. Toggles: Auto-Download, AEC 250ms Echo Guard, Local TTS Fallback
-            VoiceSettingToggleRow(
-                title = "အော့ဖ်လိုင်း မော်ဒယ် အလိုအလျောက် ဒေါင်းလုဒ် (Auto-Download)",
-                subtitle = "Wi-Fi ချိတ်ဆက်ချိန်တွင် လိုအပ်သော မော်ဒယ်ဖိုင်အား အလိုအလျောက် ရယူမည်",
-                checked = autoDownloadModels,
-                onCheckedChange = { voiceSettings.autoDownloadModels = it },
-                testTag = "toggle_auto_download_models"
-            )
-
+            // 5. Toggles: AEC 250ms Echo Guard, Local TTS Fallback
             VoiceSettingToggleRow(
                 title = "AEC 250ms Echo Hangover Guard",
                 subtitle = "TTS စကားပြောအပြီး 250ms အတွင်း ပဲ့တင်သံ ပြန်မဖမ်းမိစေရန် ကာကွယ်မည်",

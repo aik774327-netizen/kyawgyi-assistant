@@ -32,21 +32,10 @@ class HybridVoiceArchitectureTest {
         assertEquals(com.example.audio.CentralAudioRecorder.RecorderState.IDLE, recorder.recorderState.value)
     }
 
-    @Test
-    fun testSherpaOnnxOfflineStrategyExecution() = runBlocking {
-        val offlineStrategy = SherpaOnnxOfflineStrategy(context)
-        assertEquals(EngineType.SHERPA_ONNX_OFFLINE, offlineStrategy.engineType)
-
-        // Mock 16kHz PCM audio chunk (silence/audio samples)
-        val sampleChunk = ByteArray(1280) { 10 }
-        val fakeFlow = flowOf(sampleChunk, sampleChunk)
-
-        val result = offlineStrategy.processAudioStream(fakeFlow)
-        assertNotNull(result)
-        assertTrue(result.isSuccess)
-        assertEquals(EngineType.SHERPA_ONNX_OFFLINE, result.executionEngine)
-        assertTrue(result.spokenResponse.isNotBlank())
-    }
+    // The former testSherpaOnnxOfflineStrategyExecution was deleted with the
+    // SherpaOnnxOfflineStrategy itself (2026-10-22): it asserted that an
+    // energy-level heuristic "recognized" canned Burmese transcripts from
+    // silent PCM - i.e. it tested a fake. There is no offline STT engine.
 
     @Test
     fun testHybridEngineRouterInstance() {

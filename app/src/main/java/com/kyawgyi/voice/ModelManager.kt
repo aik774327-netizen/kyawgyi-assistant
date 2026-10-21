@@ -96,13 +96,13 @@ class ModelManager(private val context: Context) {
             version = "2024.06.1",
             language = "my-MM",
             engine = "SHERPA_ONNX_ZIPFORMER",
-            fileSizeBytes = 68_157_440L,
-            sha256Checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            fileSizeBytes = 0L, // unknown - model not publicly available (declared URL 404, checked 2026-10-21)
+            sha256Checksum = "", // unknown - the previously recorded value was the SHA-256 of the empty string, not of any model file
             license = "Apache-2.0",
             sourceUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-myanmar-2024.zip",
             sampleRateHz = 16000,
             minRamMb = 350,
-            qualityBenchmark = "WER 11.4% (FLEURS my_mm test set)"
+            qualityBenchmark = "Not benchmarked - model not publicly available"
         )
 
         val VOSK_SMALL_MYANMAR_MANIFEST = OfflineModelManifest(
@@ -110,13 +110,13 @@ class ModelManager(private val context: Context) {
             version = "0.4.0",
             language = "my-MM",
             engine = "VOSK_KALDI_DIPLOID",
-            fileSizeBytes = 44_040_192L,
-            sha256Checksum = "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
+            fileSizeBytes = 0L, // unknown - no Burmese model exists on the official Vosk list (checked 2026-10-21)
+            sha256Checksum = "", // unknown - previously recorded value was unverified upstream-declared data
             license = "Apache-2.0",
             sourceUrl = "https://alphacephei.com/vosk/models/vosk-model-small-my-0.4.zip",
             sampleRateHz = 16000,
             minRamMb = 256,
-            qualityBenchmark = "WER 16.8% (Command & Control Domain)"
+            qualityBenchmark = "Not benchmarked - model not listed by upstream"
         )
 
         val F5_MYANMAR_TTS_MANIFEST = OfflineModelManifest(
@@ -124,13 +124,13 @@ class ModelManager(private val context: Context) {
             version = "1.2.0",
             language = "my-MM",
             engine = "F5_ONNX_NEURAL_TTS",
-            fileSizeBytes = 52_428_800L,
-            sha256Checksum = "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+            fileSizeBytes = 0L, // unknown - declared HuggingFace repo is not publicly accessible (checked 2026-10-21)
+            sha256Checksum = "", // unknown - previously recorded value was unverified upstream-declared data
             license = "MIT",
             sourceUrl = "https://huggingface.co/kyawgyi-ai/f5-myanmar-tts-onnx/resolve/main/f5-myanmar-int8.onnx",
             sampleRateHz = 24000,
             minRamMb = 384,
-            qualityBenchmark = "MOS 4.12 (Myanmar Native Prosody Benchmark)"
+            qualityBenchmark = "Not benchmarked - model not publicly available"
         )
 
         val OFFICIAL_MODEL_MANIFESTS: List<OfflineModelManifest> = listOf(
@@ -174,12 +174,17 @@ class ModelManager(private val context: Context) {
 
     fun isSherpaOnnxModelAvailable(): Boolean {
         val modelFile = File(modelsDir, "sherpa-onnx-burmese.onnx")
-        return validateSherpa(sherpaDir) || (modelFile.exists() && modelFile.length() > 0)
+        return validateSherpa(sherpaDir) || modelFile.isUsableModelFile()
     }
 
     fun isVoskModelAvailable(): Boolean {
+        // A directory merely existing is not evidence of a usable model:
+        // require the acoustic model file (am/final.mdl) at a plausible size.
+        fun dirHasAcousticModel(dir: File): Boolean =
+            File(dir, "am/final.mdl").isUsableModelFile() || File(dir, "final.mdl").isUsableModelFile()
         val legacyVoskDir = File(modelsDir, "vosk-model-my")
-        return (voskDir.exists() && voskDir.isDirectory) || (legacyVoskDir.exists() && legacyVoskDir.isDirectory)
+        return dirHasAcousticModel(voskDir) || dirHasAcousticModel(legacyVoskDir) ||
+            dirHasAcousticModel(File(modelsDir, "vosk-model-small-my"))
     }
 
     fun getSherpaModelPath(): String =

@@ -27,13 +27,15 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 1. Active Network Health Check (Pings actual Google API endpoint, not just Wi-Fi connection state).
  * 2. Pre-caches incoming audio stream from CentralAudioRecorder to prevent dropped audio packets during fallback.
  * 3. Strict 1.5-second (1500ms) execution timeout on GeminiOnlineStrategy.
- * 4. Zero-loss Instant Fallback to SherpaOnnxOfflineStrategy if offline, timeout, or API error occurs.
+ * 4. Honest failure if offline, timeout, or API error occurs. (The former
+ *    SherpaOnnxOfflineStrategy "fallback" was an energy-level heuristic that
+ *    fabricated transcripts; it was removed on 2026-10-22. There is NO
+ *    offline STT engine in this app.)
  * 5. Dispatches Function Calls directly to KyawGyiActionExecutor (CameraManager, AudioManager, Wifi, etc.).
  */
 class HybridEngineRouter(
     private val context: Context,
     private val geminiStrategy: GeminiOnlineStrategy = GeminiOnlineStrategy(context),
-    private val offlineStrategy: SherpaOnnxOfflineStrategy = SherpaOnnxOfflineStrategy(context),
     private val actionExecutor: KyawGyiActionExecutor = KyawGyiActionExecutor(context)
 ) {
 
@@ -155,12 +157,18 @@ class HybridEngineRouter(
             Log.i(TAG, "Network is OFFLINE. Bypassing Gemini to save battery and latency.")
         }
 
-        // 3. Offline Fallback Execution (if Online failed or was bypassed)
+        // 3. No offline fallback exists: if the online attempt failed or was
+        // bypassed, report the failure honestly instead of fabricating a
+        // transcript with a heuristic pseudo-recognizer.
         if (result == null || !result!!.isSuccess) {
-            Log.i(TAG, "Executing SherpaOnnxOfflineStrategy with buffered audio...")
-            val offlineResult = offlineStrategy.processAudioStream(audioStreamFactory())
-            result = offlineResult.copy(
-                executionEngine = EngineType.HYBRID_FALLBACK
+            Log.w(TAG, "Gemini online STT unavailable and no offline STT engine exists; returning honest failure.")
+            result = AssistantResult(
+                isSuccess = false,
+                transcription = "",
+                spokenResponse = "အင်တာနက် ချိတ်ဆက်၍ မရပါ \u2014 offline အသံမှတ်မိစနစ် မရှိပါ",
+                executionEngine = EngineType.HYBRID_FALLBACK,
+                latencyMs = System.currentTimeMillis() - startTime,
+                errorMessage = if (!isOnline) "Device offline; no offline STT engine available" else "Gemini online STT failed; no offline STT engine available"
             )
         }
 
@@ -173,11 +181,6 @@ class HybridEngineRouter(
         if (finalResult.functionCall != null) {
             Log.i(TAG, "Executing mapped system action from function call: ${finalResult.functionCall.name}")
             executeSystemAction(finalResult.functionCall)
-        }
-
-        // Release or unbind heavy offline acoustic models on low RAM devices if not actively in fallback
-        if (finalResult.executionEngine != EngineType.SHERPA_ONNX_OFFLINE && finalResult.executionEngine != EngineType.HYBRID_FALLBACK) {
-            offlineStrategy.releaseModel()
         }
 
         Log.i(TAG, "Hybrid Voice Processing Finished: engine=${finalResult.executionEngine}, latency=${finalResult.latencyMs}ms")

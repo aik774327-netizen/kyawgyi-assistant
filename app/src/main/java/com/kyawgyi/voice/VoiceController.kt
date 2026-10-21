@@ -9,7 +9,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-enum class SttEngineId { AUTO, SHERPA_ONNX, VOSK, SYSTEM_ON_DEVICE }
+// SHERPA_ONNX / VOSK ids removed 2026-10-22: no such engines ever existed
+// (heuristic fakes, deleted in the fake-data removal pass).
+enum class SttEngineId { AUTO, SYSTEM_ON_DEVICE }
 enum class ModelStatus { READY, MISSING, ERROR }
 enum class EngineState { MISSING_MODEL, READY, LISTENING, PROCESSING, SPEAKING, ERROR }
 
@@ -99,10 +101,7 @@ class SuspendSttEngineManager(
         mutex.withLock { active?.let { _state.value = SttManagerState(it.id, EngineState.READY) } }
     }
 
-    private suspend fun resolveAuto(): SttEngineId =
-        listOf(SttEngineId.SHERPA_ONNX, SttEngineId.VOSK)
-            .firstOrNull { factory.get(it).prepare() == ModelStatus.READY }
-            ?: SttEngineId.SYSTEM_ON_DEVICE
+    private suspend fun resolveAuto(): SttEngineId = SttEngineId.SYSTEM_ON_DEVICE
 
     fun activeEngine(): SuspendSttEngine? = active
     suspend fun close() {

@@ -37,14 +37,12 @@ class SttEngineManagerStreamingTest {
     }
 
     @Test
-    fun `stream audio buffers from AudioCaptureModule to SherpaOnnxSttEngine updates StateFlow with partial and final transcripts`() = runBlocking {
-        sttEngineManager.selectEngine(SttEngineType.SHERPA_ONNX)
-        val expectedUtterance = "မင်္ဂလာပါ ကျော်ကြီး ဝိုင်ဖိုင် ဖွင့်ပေးပါ"
-        sttEngineManager.sherpaEngine.setStreamingHypothesisHint(expectedUtterance)
+    fun `stream audio buffers to SystemOnDeviceSttEngine updates StateFlow counters without fabricating transcripts`() = runBlocking {
+        sttEngineManager.selectEngine(SttEngineType.SYSTEM_ON_DEVICE)
         sttEngineManager.startListening()
 
         assertEquals(SttEngineState.LISTENING, sttEngineManager.engineState.value)
-        assertEquals(SttEngineType.SHERPA_ONNX, sttEngineManager.uiState.value.activeEngineType)
+        assertEquals(SttEngineType.SYSTEM_ON_DEVICE, sttEngineManager.uiState.value.activeEngineType)
 
         // Emit 8 active speech harmonic frames from AudioCaptureModule into SttEngineManager
         for (i in 0 until 8) {
@@ -61,26 +59,24 @@ class SttEngineManagerStreamingTest {
         assertEquals(8L, midStreamUiState.streamedChunksCount)
         assertEquals((8 * AudioCaptureModule.DEFAULT_FRAME_BYTES).toLong(), midStreamUiState.streamedBytesCount)
         assertTrue("RMS energy must be positive during active speech frames", midStreamUiState.currentRmsEnergy > 200.0)
-        assertTrue("Partial transcript should be populated during streaming frames", midStreamUiState.partialTranscript.isNotBlank())
+        // The system SpeechRecognizer consumes microphone audio via the OS, not
+        // via processAudio(); raw PCM frames must NOT fabricate any transcript.
+        // (The deleted Sherpa engine invented transcripts from a pre-set hint.)
+        assertEquals("", midStreamUiState.partialTranscript)
+        assertEquals("", midStreamUiState.finalTranscript)
+        assertEquals(0, midStreamUiState.totalUtterancesProcessed)
 
-        // Emit 4 trailing silence frames to trigger Sherpa-ONNX endpoint finalization
-        val silenceFrame = ByteArray(AudioCaptureModule.DEFAULT_FRAME_BYTES)
-        for (j in 0 until 4) {
-            val packet = audioCaptureModule.emitAudioBuffer(silenceFrame)
-            sttEngineManager.streamAudioBufferPacket(packet)
-        }
-
+        // Real transcripts enter only through the recognizer callback path.
+        sttEngineManager.emitTranscript("မင်္ဂလာပါ ကျော်ကြီး ဝိုင်ဖိုင် ဖွင့်ပေးပါ", isFinal = true)
         val finalUiState = sttEngineManager.uiState.value
-        assertEquals(12L, finalUiState.streamedChunksCount)
         assertEquals("မင်္ဂလာပါ ကျော်ကြီး Wi-Fi ဖွင့်ပေးပါ", finalUiState.finalTranscript)
         assertEquals(1, finalUiState.totalUtterancesProcessed)
-        assertEquals(12L, sttEngineManager.sherpaEngine.processedChunksCount)
     }
 
     @Test
     fun `Requirements 9 modules - PreRollPcmRingBuffer SincResampler HotwordBiasing CodeSwitchNormalizer and MicrophoneMuteMonitor work end to end`() = runBlocking {
         // 1. PreRollPcmRingBuffer flushes lookback audio on speech onset
-        sttEngineManager.selectEngine(SttEngineType.SHERPA_ONNX)
+        sttEngineManager.selectEngine(SttEngineType.SYSTEM_ON_DEVICE)
         sttEngineManager.startListening()
 
         val silencePcm = ByteArray(AudioCaptureModule.DEFAULT_FRAME_BYTES)
@@ -133,13 +129,14 @@ class SttEngineManagerStreamingTest {
         assertTrue(pool.getMetrics().bytePoolHits >= 2L)
         assertTrue(pool.getMetrics().hitRatioPercent > 90f)
 
-        // 2. FailureMemory & DualSttFailover quarantine failing engine and switch to healthy fallback
+        // 2. FailureMemory records failures and quarantines the failing engine;
+        // DualSttFailover resolves to SYSTEM_ON_DEVICE, the only engine that exists
         val failureMemory = FailureMemory(quarantineThreshold = 2, baseCooldownMs = 30_000L)
         val failover = DualSttFailover(ModelManager(context), failureMemory)
-        failover.onEngineFailure(SttEngineType.SHERPA_ONNX, "JNI timeout #1", nowMs = 1000L)
-        val switchedEngine = failover.onEngineFailure(SttEngineType.SHERPA_ONNX, "JNI timeout #2", nowMs = 2000L)
-        assertFalse(failureMemory.isEngineHealthy(SttEngineType.SHERPA_ONNX.name, nowMs = 2500L))
-        assertTrue(switchedEngine == SttEngineType.VOSK || switchedEngine == SttEngineType.SYSTEM_ON_DEVICE)
+        failover.onEngineFailure(SttEngineType.SYSTEM_ON_DEVICE, "Recognizer error #1", nowMs = 1000L)
+        val switchedEngine = failover.onEngineFailure(SttEngineType.SYSTEM_ON_DEVICE, "Recognizer error #2", nowMs = 2000L)
+        assertFalse(failureMemory.isEngineHealthy(SttEngineType.SYSTEM_ON_DEVICE.name, nowMs = 2500L))
+        assertEquals(SttEngineType.SYSTEM_ON_DEVICE, switchedEngine)
 
         // 3. AcousticToneGenerator synthesizes valid 16kHz 16-bit PCM earcon waveform
         val toneGen = AcousticToneGenerator(context, sampleRateHz = 16000)
@@ -263,7 +260,16 @@ class SttEngineManagerStreamingTest {
 
         val auditReport = sttEngineManager.voiceAssetManifest.inspectAll12Requirements()
         assertEquals(12, auditReport.totalCount)
-        assertEquals(12, auditReport.readyCount)
+        // Honest readiness: offline STT/TTS/KWS models and native JNI libraries
+        // do NOT exist, so their items must report NOT ready. Only the real
+        // bundled Silero VAD file and code-resident components are ready.
+        val notReadyIds = auditReport.items.filter { !it.isReady }.map { it.id }.toSet()
+        assertEquals(
+            setOf("sherpa_jni_so", "sherpa_myanmar_zipformer", "vosk_myanmar_model", "myanmar_neural_tts", "neural_kws_wakeword"),
+            notReadyIds
+        )
+        assertEquals(7, auditReport.readyCount)
+        assertTrue(auditReport.items.first { it.id == "silero_neural_vad" }.isReady)
     }
 
     @Test
@@ -286,13 +292,14 @@ class SttEngineManagerStreamingTest {
         )
         assertEquals("ရွှေတိဂုံဘုရား သွားမယ်", sttEngineManager.hotwordBiasing.applyHotwordBiasToTranscript("ရွှေတိဂုံဖရား သွားမယ်"))
 
-        // 3. NativeLibraryLoader inspects asset directories for Sherpa, TTS, Silero VAD, KWS, and Vosk
+        // 3. NativeLibraryLoader inspects model assets: only the real bundled
+        // Silero VAD may report ready; the deleted placeholder models must not.
         val binaryStatus = NativeLibraryLoader.inspectStatus(context)
-        assertTrue(binaryStatus.sherpaAssetDirReady)
-        assertTrue(binaryStatus.ttsMyanmarAssetDirReady)
+        assertFalse(binaryStatus.sherpaAssetDirReady)
+        assertFalse(binaryStatus.ttsMyanmarAssetDirReady)
         assertTrue(binaryStatus.sileroVadAssetReady)
-        assertTrue(binaryStatus.kwsAssetReady)
-        assertTrue(binaryStatus.voskAssetDirReady)
+        assertFalse(binaryStatus.kwsAssetReady)
+        assertFalse(binaryStatus.voskAssetDirReady)
 
         val vadPath = NativeLibraryLoader.getAssetFilePath(context, "models/vad/silero_vad.onnx")
         assertTrue(java.io.File(vadPath).exists())
@@ -300,7 +307,7 @@ class SttEngineManagerStreamingTest {
 
     @Test
     fun `concurrent multi-thread audio buffer streaming maintains thread-safe StateFlow counters`() = runBlocking {
-        sttEngineManager.selectEngine(SttEngineType.SHERPA_ONNX)
+        sttEngineManager.selectEngine(SttEngineType.SYSTEM_ON_DEVICE)
         sttEngineManager.startListening()
 
         val producerCount = 6
@@ -324,13 +331,12 @@ class SttEngineManagerStreamingTest {
         val uiSnapshot = sttEngineManager.uiState.value
         assertEquals(totalExpectedFrames, uiSnapshot.streamedChunksCount)
         assertEquals(totalExpectedFrames * AudioCaptureModule.DEFAULT_FRAME_BYTES, uiSnapshot.streamedBytesCount)
-        assertEquals(totalExpectedFrames, sttEngineManager.sherpaEngine.processedChunksCount)
         assertTrue(uiSnapshot.peakRmsEnergy > 1000.0)
     }
 
     @Test
     fun `collectAudioBufferStream processes Flow of PCM chunks and respects AEC echo guard`() = runBlocking {
-        sttEngineManager.selectEngine(SttEngineType.SHERPA_ONNX)
+        sttEngineManager.selectEngine(SttEngineType.SYSTEM_ON_DEVICE)
         val f1 = AudioCaptureModule.generateSpeechHarmonicPcmFrame(0, amplitude = 4200)
         val f2 = AudioCaptureModule.generateSpeechHarmonicPcmFrame(1, amplitude = 4500)
         val f3 = AudioCaptureModule.generateSpeechHarmonicPcmFrame(2, amplitude = 4800)

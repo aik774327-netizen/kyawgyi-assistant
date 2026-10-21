@@ -2,10 +2,14 @@ package com.kyawgyi.voice
 
 /**
  * Supported Speech-to-Text engine types in the KyawGyi Voice Assistant pipeline.
+ *
+ * Only the Android system recognizer remains: the former SHERPA_ONNX and VOSK
+ * tiers were heuristic fakes (no real model or native library ever existed)
+ * and were removed in the 2026-10-22 fake-data removal pass. Persisted
+ * preference values naming the removed engines fail [Enum.valueOf] and fall
+ * back to [SYSTEM_ON_DEVICE] in VoiceSettings.
  */
 enum class SttEngineType {
-    SHERPA_ONNX,
-    VOSK,
     SYSTEM_ON_DEVICE
 }
 

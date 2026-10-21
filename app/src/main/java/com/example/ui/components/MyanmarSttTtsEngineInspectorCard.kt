@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.example.nlu.BurmeseNluPreprocessor
 import com.example.nlu.BurmeseTtsTextNormalizer
 import com.example.nlu.LocalBurmeseIntentParser
+import com.kyawgyi.voice.MyanmarPronunciationLexicon
 import com.example.ui.theme.AngelCardDark
 import com.example.ui.theme.AngelCyanAccent
 import com.example.ui.theme.AngelDarkBackground
@@ -44,7 +45,8 @@ import kotlinx.coroutines.launch
  * MyanmarSttTtsEngineInspectorCard
  *
  * Interactive Diagnostic & Verification Card for KyawGyi Myanmar STT/TTS Engine:
- * 1. Inspects Multi-Tier STT Fallback Chain (Sherpa-ONNX Zipformer -> Vosk -> System SpeechRecognizer).
+ * 1. Inspects the Android System STT engine (the former Sherpa-ONNX/Vosk tiers were
+ *    heuristic fakes and were removed on 2026-10-22; no offline STT model exists).
  * 2. Inspects TTS Engine (F5MyanmarTtsClient -> MyanmarTTSEngine -> Google TTS my-MM Voice Pack + Safety Gate).
  * 3. Inspects Hardware DSP (AEC / NS / AGC) & 150-600ms Echo Hangover Guard.
  * 4. Provides an interactive Burmese NLU (STT Normalization) & G2P (TTS Normalization) Live Verification Testbench.
@@ -162,7 +164,7 @@ fun MyanmarSttTtsEngineInspectorCard(
                             color = Color.White
                         )
                         Text(
-                            text = "3-Tier Offline/System STT • F5/Google my-MM TTS • NLU & G2P Verifier",
+                            text = "System STT • Google my-MM TTS • NLU & G2P Verifier",
                             fontSize = 11.sp,
                             color = AngelCyanAccent
                         )
@@ -203,7 +205,7 @@ fun MyanmarSttTtsEngineInspectorCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "၁။ Speech-to-Text (STT) Multi-Tier Engine",
+                            text = "၁။ Speech-to-Text (STT) System Engine",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = AngelCyanAccent
@@ -229,9 +231,7 @@ fun MyanmarSttTtsEngineInspectorCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         val tiers = listOf(
-                            Triple(SttEngineType.SHERPA_ONNX, "Tier 1: Sherpa-ONNX", sttHealth.isSherpaModelReady),
-                            Triple(SttEngineType.VOSK, "Tier 2: Vosk MM", sttHealth.isVoskModelReady),
-                            Triple(SttEngineType.SYSTEM_ON_DEVICE, "Tier 3: Android STT", sttHealth.isSystemSttAvailable)
+                            Triple(SttEngineType.SYSTEM_ON_DEVICE, "Android System STT", sttHealth.isSystemSttAvailable)
                         )
                         tiers.forEach { (engineType, label, isReady) ->
                             val isSelected = sttHealth.activeEngineType == engineType
@@ -262,7 +262,7 @@ fun MyanmarSttTtsEngineInspectorCard(
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = if (isReady) "Ready ✓" else "Fallback Active",
+                                        text = if (isReady) "Ready ✓" else "Not Available",
                                         fontSize = 9.sp,
                                         color = if (isReady) AngelNeonGreen else Color(0xFFFFB74D)
                                     )
@@ -289,7 +289,7 @@ fun MyanmarSttTtsEngineInspectorCard(
                         )
                     }
 
-                    // AudioCaptureModule ➔ Model-Based STT (Sherpa-ONNX) Live Streaming Buffer Telemetry
+                    // AudioCaptureModule ➔ System STT Live Streaming Buffer Telemetry
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = Color.Black.copy(alpha = 0.4f),
@@ -350,7 +350,7 @@ fun MyanmarSttTtsEngineInspectorCard(
                             )
 
                             Text(
-                                text = "G2P Rules: ${sttUiState.g2pRulesCount} • Homophone Matrix: ACTIVE ✓ • 12-Item Audit: ${sttUiState.requirements12ReadyCount}/12 ✓",
+                                text = "G2P Rules: ${sttUiState.g2pRulesCount} • Homophone Matrix: ${MyanmarPronunciationLexicon.SPOKEN_TO_ORTHOGRAPHY_STT.size} entries",
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 color = AngelNeonGreen
@@ -394,31 +394,6 @@ fun MyanmarSttTtsEngineInspectorCard(
 
                     OutlinedButton(
                         onClick = {
-                            sttManager.simulateAudioCaptureToSherpaStream(testInputText)
-                        },
-                        border = BorderStroke(1.dp, AngelCyanAccent),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AngelCyanAccent),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(36.dp)
-                            .testTag("btn_test_audio_capture_streaming")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.GraphicEq,
-                            contentDescription = "Test AudioCaptureModule to Sherpa-ONNX Streaming",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "AudioCaptureModule ➔ Sherpa-ONNX Buffer Stream စမ်းမည်",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = {
                             sttManager.triggerThreeSecondMicLoopbackCheck(durationMs = 3000)
                         },
                         border = BorderStroke(1.dp, AngelNeonGreen),
@@ -442,41 +417,6 @@ fun MyanmarSttTtsEngineInspectorCard(
                         )
                     }
 
-                    if (!sttHealth.isSherpaModelReady || !sttHealth.isVoskModelReady) {
-                        OutlinedButton(
-                            onClick = {
-                                com.kyawgyi.voice.ModelDownloader.getInstance(context).startDownload { success ->
-                                    sttManager.ensureHealthyEngineSelected()
-                                    sttHealth = sttManager.getHealthReport()
-                                    val msg = if (success) {
-                                        "Sherpa-ONNX နှင့် Vosk မြန်မာ အော့ဖ်လိုင်း မော်ဒယ်များ အသင့်ဖြစ်ပါပြီ ✓"
-                                    } else {
-                                        "မော်ဒယ် ထည့်သွင်းမှု မအောင်မြင်ပါ"
-                                    }
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            border = BorderStroke(1.dp, AngelNeonGreen),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AngelNeonGreen),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(34.dp)
-                                .testTag("install_offline_models_quick_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DownloadForOffline,
-                                contentDescription = "Install Offline Models",
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Sherpa-ONNX & Vosk အော့ဖ်လိုင်း မော်ဒယ် ထည့်သွင်းမည်",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
                 }
             }
 

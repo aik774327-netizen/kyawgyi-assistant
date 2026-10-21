@@ -81,19 +81,15 @@ class ErrorLearningAndVoiceSettingsUiTest {
         }
 
         composeTestRule.onNodeWithTag("stt_tts_model_and_voice_settings_card").assertExists()
-        composeTestRule.onNodeWithTag("sherpa_model_status_box").assertExists()
-        composeTestRule.onNodeWithTag("vosk_model_status_box").assertExists()
-        composeTestRule.onNodeWithTag("start_model_download_btn").assertExists()
+        composeTestRule.onNodeWithTag("system_stt_status_box").assertExists()
+        // The honest note replaces the old Sherpa/Vosk status boxes and the
+        // model-download button (those models never existed; removed 2026-10-22).
+        composeTestRule.onNodeWithTag("offline_models_removed_note").assertExists()
 
-        // Select SHERPA_ONNX STT engine via UI
-        composeTestRule.onNodeWithTag("select_stt_engine_sherpa_onnx").performScrollTo().performClick()
-        assertEquals(SttEngineType.SHERPA_ONNX, voiceSettings.preferredSttEngine)
-        assertEquals(SttEngineType.SHERPA_ONNX, sttManager.activeEngine?.engineType)
-
-        // Select VOSK STT engine via UI
-        composeTestRule.onNodeWithTag("select_stt_engine_vosk").performScrollTo().performClick()
-        assertEquals(SttEngineType.VOSK, voiceSettings.preferredSttEngine)
-        assertEquals(SttEngineType.VOSK, sttManager.activeEngine?.engineType)
+        // Select the (only) SYSTEM_ON_DEVICE STT engine via UI
+        composeTestRule.onNodeWithTag("select_stt_engine_system_on_device").performScrollTo().performClick()
+        assertEquals(SttEngineType.SYSTEM_ON_DEVICE, voiceSettings.preferredSttEngine)
+        assertEquals(SttEngineType.SYSTEM_ON_DEVICE, sttManager.activeEngine?.engineType)
 
         // Reset defaults via UI
         composeTestRule.onNodeWithTag("reset_voice_settings_btn").performScrollTo().performClick()

@@ -17,7 +17,6 @@ data class AssistantResult(
 
 enum class EngineType {
     GEMINI_ONLINE,
-    SHERPA_ONNX_OFFLINE,
     HYBRID_FALLBACK
 }
 

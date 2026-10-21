@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
  */
 data class VoiceEngine12Status(
     val isInitialized: Boolean = false,
-    val activeSttEngine: SttEngineType = SttEngineType.SHERPA_ONNX,
+    val activeSttEngine: SttEngineType = SttEngineType.SYSTEM_ON_DEVICE,
     val isAecActive: Boolean = false,
     val isTelephonyPreempted: Boolean = false,
     val isMicMuted: Boolean = false,

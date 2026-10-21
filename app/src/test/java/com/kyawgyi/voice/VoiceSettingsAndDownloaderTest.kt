@@ -42,9 +42,9 @@ class VoiceSettingsAndDownloaderTest {
         assertTrue(voiceSettings.isAecHangoverEnabled)
         assertTrue(voiceSettings.useLocalTtsFallback)
 
-        // Mutate and check update
-        voiceSettings.preferredSttEngine = SttEngineType.SHERPA_ONNX
-        assertEquals(SttEngineType.SHERPA_ONNX, voiceSettings.preferredSttEngine)
+        // Mutate and check update (SYSTEM_ON_DEVICE is the only engine that exists)
+        voiceSettings.preferredSttEngine = SttEngineType.SYSTEM_ON_DEVICE
+        assertEquals(SttEngineType.SYSTEM_ON_DEVICE, voiceSettings.preferredSttEngine)
 
         voiceSettings.ttsSpeechRate = 1.25f
         assertEquals(1.25f, voiceSettings.ttsSpeechRate, 0.01f)

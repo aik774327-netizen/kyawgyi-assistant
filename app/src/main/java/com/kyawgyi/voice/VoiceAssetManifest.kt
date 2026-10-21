@@ -47,85 +47,85 @@ class VoiceAssetManifest(
                 itemNumber = 1,
                 id = "sherpa_jni_so",
                 title = "Sherpa-ONNX Native JNI (libsherpa-onnx-jni.so)",
-                isReady = true,
-                detail = if (hasSherpaJni) "Native JNI Loaded ✓" else "JNI Bridge Ready (System/Streaming Fallback Active)"
+                isReady = hasSherpaJni,
+                detail = if (hasSherpaJni) "Native JNI library present on device" else "Not installed — no sherpa-onnx JNI library ships with this app"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 2,
                 id = "sherpa_myanmar_zipformer",
                 title = "Myanmar Zipformer ONNX Model (encoder/decoder/joiner/tokens)",
-                isReady = modelManager.isSherpaOnnxModelAvailable() || hasBundledMyanmarAssets(),
-                detail = if (hasBundledMyanmarAssets()) "Assets Bundled in APK ✓" else "Downloadable via ModelDownloader"
+                isReady = modelManager.isSherpaOnnxModelAvailable(),
+                detail = if (modelManager.isSherpaOnnxModelAvailable()) "Model files present on device storage" else "Not installed — no public Myanmar sherpa-onnx model exists (declared URL verified 404 on 2026-10-21)"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 3,
                 id = "vosk_myanmar_model",
-                title = "Vosk Myanmar Direct PCM Recognizer & Grammar",
-                isReady = true,
-                detail = if (hasVoskJni || modelManager.isVoskModelAvailable()) "Vosk Native Ready ✓" else "VoskDirectPcmRecognizer Active ✓"
+                title = "Vosk Myanmar Model & Native Library",
+                isReady = hasVoskJni && modelManager.isVoskModelAvailable(),
+                detail = if (hasVoskJni && modelManager.isVoskModelAvailable()) "Vosk native library and model present" else "Not installed — no Burmese model exists on the official Vosk model list (checked 2026-10-21)"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 4,
                 id = "myanmar_neural_tts",
-                title = "Offline Myanmar Neural / Prosody TTS Engine",
-                isReady = true,
-                detail = "F5/VITS Client + Built-in Myanmar Prosody Synthesizer Active ✓"
+                title = "Offline Myanmar Neural TTS Model (F5/VITS ONNX)",
+                isReady = false,
+                detail = "Not installed — the F5 Myanmar TTS model repo is not publicly accessible (checked 2026-10-21); the Android system TTS engine is used instead"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 5,
                 id = "neural_kws_wakeword",
-                title = "Wake-Word KWS Adapter (\"ဟေး ကျော်ကြီး\")",
-                isReady = true,
-                detail = if (kwsAdapter.isNeuralModelInstalled()) "ONNX KWS Loaded ✓" else "NeuralWakeWordKwsAdapter + Acoustic KWS Active ✓"
+                title = "Wake-Word KWS ONNX Model (\"ဟေး ကျော်ကြီး\")",
+                isReady = kwsAdapter.isNeuralModelInstalled(),
+                detail = if (kwsAdapter.isNeuralModelInstalled()) "KWS ONNX model file present" else "Not installed — no public KWS model exists; wake-word detection uses the system recognizer path"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 6,
                 id = "silero_neural_vad",
-                title = "Silero Neural VAD Adapter (silero_vad.onnx)",
-                isReady = true,
-                detail = if (sileroVad.isNeuralModelInstalled()) "Silero ONNX Loaded ✓" else "SileroNeuralVadAdapter + Adaptive RMS/ZCR Active ✓"
+                title = "Silero VAD Model File (silero_vad.onnx)",
+                isReady = sileroVad.isNeuralModelInstalled(),
+                detail = if (sileroVad.isNeuralModelInstalled()) "Real silero_vad.onnx bundled in APK (643,854 bytes)" else "Model file missing or too small to be a real ONNX binary"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 7,
                 id = "burmese_g2p_lexicon",
                 title = "Exceptional Burmese G2P Dictionary (ရေးတော့အမှန် ဖတ်တော့အသံ)",
                 isReady = MyanmarPronunciationLexicon.ORTHOGRAPHY_TO_SPOKEN_G2P.isNotEmpty(),
-                detail = "${MyanmarPronunciationLexicon.ORTHOGRAPHY_TO_SPOKEN_G2P.size} G2P Rules Active ✓"
+                detail = "${MyanmarPronunciationLexicon.ORTHOGRAPHY_TO_SPOKEN_G2P.size} G2P rules present in code"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 8,
                 id = "burmese_homophone_matrix",
                 title = "Context-Aware Burmese ASR Homophone Disambiguation Matrix",
                 isReady = MyanmarPronunciationLexicon.SPOKEN_TO_ORTHOGRAPHY_STT.isNotEmpty(),
-                detail = "Context Homophone Matrix Active ✓"
+                detail = "Homophone matrix present in code (${MyanmarPronunciationLexicon.SPOKEN_TO_ORTHOGRAPHY_STT.size} entries)"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 9,
                 id = "myanmar_proper_noun_hotwords",
                 title = "Myanmar Cities, Townships, Honorifics & Contacts Hotwords",
                 isReady = ProperNounHotwordDataset.allDefaultProperNouns().isNotEmpty(),
-                detail = "${ProperNounHotwordDataset.allDefaultProperNouns().size} Proper Nouns Registered ✓"
+                detail = "${ProperNounHotwordDataset.allDefaultProperNouns().size} proper nouns registered in code"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 10,
                 id = "streaming_tts_queue",
-                title = "Zero-Latency Sentence-Pipelined Streaming TTS Queue",
+                title = "Sentence-Pipelined Streaming TTS Queue (code component)",
                 isReady = true,
-                detail = "StreamingTtsQueue (Pote-Hti / Pote-Ma Pipelining) Active ✓"
+                detail = "StreamingTtsQueue class is present in the app (code component, not a model)"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 11,
                 id = "headset_ptt_receiver",
                 title = "Bluetooth Earbud / Headset Button Push-to-Talk Receiver",
                 isReady = HeadsetPushToTalkReceiver.SUPPORTED_PTT_KEYCODES.isNotEmpty(),
-                detail = "HeadsetPushToTalkReceiver (HEADSETHOOK / PLAY_PAUSE) Active ✓"
+                detail = "HeadsetPushToTalkReceiver supports ${HeadsetPushToTalkReceiver.SUPPORTED_PTT_KEYCODES.size} PTT keycodes in code"
             ),
             VoiceAssetCheckItem(
                 itemNumber = 12,
                 id = "android14_foreground_mic_service",
                 title = "Android 14+ Foreground Service Microphone Type & WakeLock Guard",
                 isReady = true,
-                detail = "VoiceForegroundService (FOREGROUND_SERVICE_TYPE_MICROPHONE) Ready ✓"
+                detail = "VoiceForegroundService is declared in the manifest with FOREGROUND_SERVICE_TYPE_MICROPHONE (code component)"
             )
         )
 
@@ -136,9 +136,3 @@ class VoiceAssetManifest(
         )
     }
 
-    private fun hasBundledMyanmarAssets(): Boolean =
-        runCatching {
-            val list = context.assets.list("models/myanmar") ?: emptyArray()
-            list.contains("encoder.onnx") && list.contains("tokens.txt")
-        }.getOrDefault(false)
-}
