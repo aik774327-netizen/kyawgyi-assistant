@@ -109,7 +109,9 @@ fun DictationScreen(
         }
     }
 
-    // Final transcripts are inserted at the caret; interim text is only
+    // Final transcripts that reach this flow have already been routed by
+    // the ViewModel: segments the command pipeline executed never arrive
+    // here; the rest are inserted at the caret. Interim text is only
     // shown in the "ယာယီစာသား" strip and never touches the document.
     LaunchedEffect(viewModel) {
         viewModel.finalTranscripts.collect { final ->
@@ -418,6 +420,14 @@ fun DictationScreen(
                         )
                         Text("Auto-save", fontSize = 11.sp)
                     }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Switch(
+                            checked = state.commandCheckEnabled,
+                            onCheckedChange = { viewModel.setCommandCheckEnabled(it) },
+                            modifier = Modifier.testTag("dictation_command_check_switch")
+                        )
+                        Text("အမိန့်အဖြစ် စစ်ရန်", fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -463,6 +473,7 @@ fun DictationScreen(
 
         Text(
             text = "အသုံးပြုနည်း: မိုက်ခရိုဖုန်းကို နှိပ်၍ စတင်ပါ၊ ထပ်နှိပ်၍ ရပ်ပါ။ စာသားကို တိုက်ရိုက်ပြင်ဆင်နိုင်သည်။\n" +
+                "\"အမိန့်အဖြစ် စစ်ရန်\" ဖွင့်ထားပါက ပြောလိုက်သော စာသားက အမိန့် (ဥပမာ \"Facebook ဖွင့်ပေးပါ\") ဖြစ်နေလျှင် စာသားအဖြစ် မထည့်ဘဲ ချက်ချင်း လုပ်ဆောင်ပေးသည်။\n" +
                 "မှတ်ချက်: အသံမှစာသားပြောင်းခြင်းကို ဖုန်း၏ Speech Recognition ဝန်ဆောင်မှုက ပံ့ပိုးရမည်ဖြစ်ပြီး အချို့ ဖုန်းများတွင် အင်တာနက်လိုနိုင်သည်။ " +
                 "မြန်မာဘာသာကို ဖုန်းဝန်ဆောင်မှုက မပံ့ပိုးပါက ဘာသာစကားရွေးချယ်ခြင်းတစ်ခုတည်းဖြင့် မဖြေရှင်းနိုင်ပါ။",
             fontSize = 12.sp,

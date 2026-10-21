@@ -31,6 +31,7 @@ class DictationStore(context: Context) {
             DictationDocument.KEY_LANGUAGE to (prefs[KEY_LANGUAGE] ?: ""),
             DictationDocument.KEY_AUTO_RESTART to (prefs[KEY_AUTO_RESTART]?.toString() ?: ""),
             DictationDocument.KEY_AUTO_SAVE to (prefs[KEY_AUTO_SAVE]?.toString() ?: ""),
+            DictationDocument.KEY_COMMAND_CHECK to (prefs[KEY_COMMAND_CHECK]?.toString() ?: ""),
             DictationDocument.KEY_UPDATED_AT to (prefs[KEY_UPDATED_AT]?.toString() ?: "")
         )
         return DictationDocument.decode(values)
@@ -42,6 +43,7 @@ class DictationStore(context: Context) {
             prefs[KEY_LANGUAGE] = document.language
             prefs[KEY_AUTO_RESTART] = document.autoRestart
             prefs[KEY_AUTO_SAVE] = document.autoSave
+            prefs[KEY_COMMAND_CHECK] = document.commandCheckEnabled
             prefs[KEY_UPDATED_AT] = document.updatedAtMs
         }
     }
@@ -51,6 +53,7 @@ class DictationStore(context: Context) {
         private val KEY_LANGUAGE = stringPreferencesKey(DictationDocument.KEY_LANGUAGE)
         private val KEY_AUTO_RESTART = booleanPreferencesKey(DictationDocument.KEY_AUTO_RESTART)
         private val KEY_AUTO_SAVE = booleanPreferencesKey(DictationDocument.KEY_AUTO_SAVE)
+        private val KEY_COMMAND_CHECK = booleanPreferencesKey(DictationDocument.KEY_COMMAND_CHECK)
         private val KEY_UPDATED_AT = longPreferencesKey(DictationDocument.KEY_UPDATED_AT)
     }
 }

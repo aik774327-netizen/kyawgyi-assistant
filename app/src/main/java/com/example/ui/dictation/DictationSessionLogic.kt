@@ -142,6 +142,7 @@ data class DictationDocument(
     val language: String = DICTATION_DEFAULT_LANGUAGE,
     val autoRestart: Boolean = true,
     val autoSave: Boolean = true,
+    val commandCheckEnabled: Boolean = true,
     val updatedAtMs: Long = 0L
 ) {
     /** Encode to a flat string map for DataStore Preferences storage. */
@@ -150,6 +151,7 @@ data class DictationDocument(
         KEY_LANGUAGE to language,
         KEY_AUTO_RESTART to autoRestart.toString(),
         KEY_AUTO_SAVE to autoSave.toString(),
+        KEY_COMMAND_CHECK to commandCheckEnabled.toString(),
         KEY_UPDATED_AT to updatedAtMs.toString()
     )
 
@@ -158,6 +160,7 @@ data class DictationDocument(
         const val KEY_LANGUAGE = "dictation_language"
         const val KEY_AUTO_RESTART = "dictation_auto_restart"
         const val KEY_AUTO_SAVE = "dictation_auto_save"
+        const val KEY_COMMAND_CHECK = "dictation_command_check"
         const val KEY_UPDATED_AT = "dictation_updated_at"
 
         /** Decode a stored map; every field falls back to an honest default. */
@@ -166,9 +169,40 @@ data class DictationDocument(
             language = validateDictationLanguage(values[KEY_LANGUAGE]),
             autoRestart = values[KEY_AUTO_RESTART]?.toBooleanStrictOrNull() ?: true,
             autoSave = values[KEY_AUTO_SAVE]?.toBooleanStrictOrNull() ?: true,
+            // Command-check defaults ON, including for documents stored
+            // before the setting existed (user-approved default, 2026-10-22).
+            commandCheckEnabled = values[KEY_COMMAND_CHECK]?.toBooleanStrictOrNull() ?: true,
             updatedAtMs = values[KEY_UPDATED_AT]?.toLongOrNull() ?: 0L
         )
     }
+}
+
+// ---------------------------------------------------------------
+// Command routing decision (dictation finals → voice-command pipeline)
+// ---------------------------------------------------------------
+
+/** Result of asking the app's command pipeline about one final segment. */
+enum class DictationCommandCheckResult { HANDLED, NOT_HANDLED, FAILED }
+
+/** What the dictation screen should do with one final segment. */
+enum class DictationSegmentDecision { INSERT_AS_TEXT, EXECUTED_AS_COMMAND, SURFACE_ERROR }
+
+/**
+ * Pure routing decision for one final dictation segment:
+ *  - command-check off → the segment is always plain text;
+ *  - pipeline handled it → it was executed as a command, never filed as text;
+ *  - pipeline did not handle it → plain dictated text, inserted at the caret;
+ *  - pipeline threw → surface an honest error and drop the segment (it was
+ *    meant as a command; silently filing it as text would hide the failure).
+ */
+fun decideDictationSegmentRoute(
+    commandCheckEnabled: Boolean,
+    checkResult: DictationCommandCheckResult?
+): DictationSegmentDecision = when {
+    !commandCheckEnabled -> DictationSegmentDecision.INSERT_AS_TEXT
+    checkResult == DictationCommandCheckResult.HANDLED -> DictationSegmentDecision.EXECUTED_AS_COMMAND
+    checkResult == DictationCommandCheckResult.FAILED -> DictationSegmentDecision.SURFACE_ERROR
+    else -> DictationSegmentDecision.INSERT_AS_TEXT
 }
 
 /** Auto-save lifecycle shown next to the character count. */

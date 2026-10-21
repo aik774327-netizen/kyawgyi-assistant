@@ -5,7 +5,10 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.LanguagePreferencesRepository
+import com.example.router.CommandRouteResult
+import com.example.router.KyawGyiDispatcher
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +34,8 @@ data class DictationUiState(
     val languageCode: String = DICTATION_DEFAULT_LANGUAGE,
     val autoRestart: Boolean = true,
     val autoSave: Boolean = true,
+    /** When on, final segments are first offered to the command pipeline. */
+    val commandCheckEnabled: Boolean = true,
     val saveState: DictationSaveState = DictationSaveState.IDLE
 )
 
@@ -48,12 +53,32 @@ data class DictationFinalTranscript(
  * debounced ~250 ms like the HTML v2.1 auto-save), and the shared voice
  * language (via the app's [LanguagePreferencesRepository], whose supported
  * list already contains my-MM / en-US / th-TH).
+ *
+ * Command integration: every FINAL segment is routed here first. When the
+ * "အမိန့်အဖြစ် စစ်ရန်" toggle is on (default), the segment is offered to the
+ * app's existing command pipeline via [KyawGyiDispatcher.tryExecuteCommand]
+ * — the same custom-shortcut + static-router path as
+ * [KyawGyiDispatcher.processVoiceCommand]. A handled segment is executed by
+ * that pipeline and never reaches the document; an unhandled segment is
+ * emitted on [finalTranscripts] for caret insertion, exactly as before.
+ * Interim transcripts are never routed. Executions are serialized through
+ * a single-consumer channel so two finals can never run concurrently or
+ * out of order, and routing never blocks the recognizer session.
  */
 class DictationViewModel(application: Application) : AndroidViewModel(application) {
 
     private val store = DictationStore(application)
     private val languageRepository = LanguagePreferencesRepository.getInstance(application)
     private val restartGuard = RestartGuard()
+
+    /** The app's existing command pipeline; built lazily on first use. */
+    private val commandDispatcher by lazy { KyawGyiDispatcher(application) }
+
+    /**
+     * Final segments awaiting routing, consumed by ONE coroutine so
+     * command executions are strictly serialized in arrival order.
+     */
+    private val finalRoutingChannel = Channel<DictationFinalTranscript>(Channel.UNLIMITED)
 
     private val _uiState = MutableStateFlow(DictationUiState())
     val uiState: StateFlow<DictationUiState> = _uiState.asStateFlow()
@@ -95,7 +120,10 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
             override fun onFinalTranscript(text: String, confidence: Float) {
                 _uiState.update { it.copy(interimText = "") }
-                _finalTranscripts.tryEmit(DictationFinalTranscript(text, confidence))
+                // Blank finals are ignored, as before (the insertion path
+                // dropped them); real segments queue for routing.
+                if (text.isBlank()) return
+                finalRoutingChannel.trySend(DictationFinalTranscript(text, confidence))
             }
 
             override fun onRecognizerError(kind: DictationErrorKind) {
@@ -134,10 +162,17 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     // the document only restores this screen's toggles.
                     autoRestart = stored.autoRestart,
                     autoSave = stored.autoSave,
+                    commandCheckEnabled = stored.commandCheckEnabled,
                     saveState = if (stored.autoSave) DictationSaveState.SAVED else DictationSaveState.DISABLED
                 )
             }
             _loadedDocument.value = stored
+        }
+        // Single consumer: routes final segments one at a time, in order.
+        viewModelScope.launch {
+            for (segment in finalRoutingChannel) {
+                routeFinalTranscript(segment)
+            }
         }
         viewModelScope.launch {
             languageRepository.selectedLanguageState.collect { code ->
@@ -183,6 +218,70 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         saveJob = viewModelScope.launch { persistCurrentDocument() }
     }
 
+    fun setCommandCheckEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(commandCheckEnabled = enabled) }
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch { persistCurrentDocument() }
+    }
+
+    // ---------------------------------------------------------------
+    // Final-segment routing: command pipeline first, document second
+    // ---------------------------------------------------------------
+
+    /**
+     * Route one final segment. Runs on the single routing consumer, so
+     * executions are serialized; the recognizer session is untouched.
+     */
+    private suspend fun routeFinalTranscript(segment: DictationFinalTranscript) {
+        if (!_uiState.value.commandCheckEnabled) {
+            _finalTranscripts.emit(segment)
+            return
+        }
+        var handledResponse: String? = null
+        val checkResult = try {
+            when (val result = commandDispatcher.tryExecuteCommand(segment.text)) {
+                is CommandRouteResult.Handled -> {
+                    handledResponse = result.response
+                    DictationCommandCheckResult.HANDLED
+                }
+                CommandRouteResult.NotHandled -> DictationCommandCheckResult.NOT_HANDLED
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Command routing failed for a dictation segment: ${e.message}")
+            DictationCommandCheckResult.FAILED
+        }
+        when (decideDictationSegmentRoute(commandCheckEnabled = true, checkResult = checkResult)) {
+            DictationSegmentDecision.EXECUTED_AS_COMMAND -> {
+                val response = handledResponse ?: return
+                // Surface the pipeline's own confirmation both in the
+                // status chip (stays until the next recognizer event)
+                // and as a toast; the segment is NOT inserted as text.
+                _uiState.update {
+                    it.copy(
+                        statusMessage = response,
+                        statusKind = DictationStatusKind.IDLE,
+                        guidanceMessage = null
+                    )
+                }
+                _userMessages.tryEmit(response)
+            }
+            DictationSegmentDecision.SURFACE_ERROR -> {
+                // The segment was offered as a command and the pipeline
+                // failed: report honestly and drop the segment rather
+                // than silently filing it as document text.
+                _uiState.update {
+                    it.copy(
+                        statusMessage = "အမိန့် လုပ်ဆောင်ရာတွင် အဆင်မပြေပါ",
+                        statusKind = DictationStatusKind.ERROR,
+                        guidanceMessage = "အမိန့်ကို လုပ်ဆောင်ရာတွင် ပြဿနာ ဖြစ်ပွားခဲ့သည်။ ထိုစာသားကို စာရွက်ထဲ မထည့်ခဲ့ပါ။"
+                    )
+                }
+                _userMessages.tryEmit("အမိန့် လုပ်ဆောင်ရာတွင် အဆင်မပြေပါ")
+            }
+            DictationSegmentDecision.INSERT_AS_TEXT -> _finalTranscripts.emit(segment)
+        }
+    }
+
     private suspend fun persistCurrentDocument() {
         val state = _uiState.value
         val document = DictationDocument(
@@ -190,6 +289,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             language = state.languageCode,
             autoRestart = state.autoRestart,
             autoSave = state.autoSave,
+            commandCheckEnabled = state.commandCheckEnabled,
             updatedAtMs = System.currentTimeMillis()
         )
         try {
