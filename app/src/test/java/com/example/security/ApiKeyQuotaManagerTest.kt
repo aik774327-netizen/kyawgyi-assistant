@@ -37,9 +37,8 @@ class ApiKeyQuotaManagerTest {
         // vault now (correctly) fails closed without one - the deterministic
         // fallback key was removed as FAKE-12. Inject a real platform AES key
         // through the vault's test-only seam; production code never does this.
-        val vault = SecureKeyVault(context) {
-            javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
-        }
+        val testKey = javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val vault = SecureKeyVault(context) { testKey }
         val testSecret = "AIzaSySecretApiKey123456789"
 
         val encrypted = vault.encrypt(testSecret)
