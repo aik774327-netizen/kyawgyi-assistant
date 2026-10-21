@@ -84,57 +84,6 @@ class DeviceAudioMediaScanner(
             }
         }
 
-        // Built-in starter tracks to guarantee "မာယာ" (Maya) and top songs always work seamlessly
-        val DEFAULT_DEMO_TRACKS = listOf(
-            LocalAudioTrack(
-                id = 99901L,
-                title = "မာယာ",
-                artist = "မြန်မာ တေးဂီတ",
-                album = "အကောင်းဆုံး တေးစု",
-                filePath = "/demo/music/maya.mp3",
-                contentUri = Uri.EMPTY,
-                durationMs = 215000L,
-                normalizedTitle = "မာယာ",
-                phoneticTitle = "မာယာ",
-                isDemoTrack = true
-            ),
-            LocalAudioTrack(
-                id = 99902L,
-                title = "မိုး",
-                artist = "မြန်မာ တေးဂီတ",
-                album = "အကောင်းဆုံး တေးစု",
-                filePath = "/demo/music/moe.mp3",
-                contentUri = Uri.EMPTY,
-                durationMs = 195000L,
-                normalizedTitle = "မိုး",
-                phoneticTitle = "မိုး",
-                isDemoTrack = true
-            ),
-            LocalAudioTrack(
-                id = 99903L,
-                title = "အလွမ်း",
-                artist = "မြန်မာ တေးဂီတ",
-                album = "အချစ်သီချင်းများ",
-                filePath = "/demo/music/alwan.mp3",
-                contentUri = Uri.EMPTY,
-                durationMs = 240000L,
-                normalizedTitle = "အလွမ်း",
-                phoneticTitle = "အလွမ်း",
-                isDemoTrack = true
-            ),
-            LocalAudioTrack(
-                id = 99904L,
-                title = "Maya",
-                artist = "Myanmar Classic",
-                album = "Best Hits",
-                filePath = "/demo/music/maya_en.mp3",
-                contentUri = Uri.EMPTY,
-                durationMs = 215000L,
-                normalizedTitle = "maya",
-                phoneticTitle = "မာယာ",
-                isDemoTrack = true
-            )
-        )
     }
 
     private val cachedTracks = mutableListOf<LocalAudioTrack>()
@@ -255,15 +204,11 @@ class DeviceAudioMediaScanner(
                 Log.e(TAG, "Error querying MediaStore audio", e)
             }
         } else {
-            Log.w(TAG, "Audio permission not granted, scanning with fallback demo catalog")
+            Log.w(TAG, "Audio permission not granted; returning empty catalog (no demo tracks)")
         }
 
-        // 2. Always include default tracks for instant zero-config availability
-        for (demo in DEFAULT_DEMO_TRACKS) {
-            if (trackList.none { it.title.equals(demo.title, ignoreCase = true) }) {
-                trackList.add(demo)
-            }
-        }
+        // Only real MediaStore results are returned; an empty scan
+        // honestly yields an empty catalog (demo tracks removed 2026-10-22).
 
         synchronized(cachedTracks) {
             cachedTracks.clear()

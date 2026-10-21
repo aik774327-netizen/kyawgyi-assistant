@@ -98,61 +98,6 @@ class MusicController private constructor(private val context: Context) {
             }
         }
 
-        // Standard demo tracks to ensure zero crash rate in sandboxed test environments
-        val DEFAULT_DEMO_TRACKS = listOf(
-            AudioFileItem(
-                id = 10001L,
-                fileName = "maya.mp3",
-                title = "မာယာ",
-                artist = "မြန်မာ တေးဂီတ",
-                album = "အကောင်းဆုံး တေးစု",
-                durationMs = 215000L,
-                filePath = "/storage/emulated/0/Music/maya.mp3",
-                contentUri = Uri.EMPTY,
-                normalizedFileName = "maya",
-                normalizedTitle = "မာယာ",
-                isDemo = true
-            ),
-            AudioFileItem(
-                id = 10002L,
-                fileName = "moe.mp3",
-                title = "မိုး",
-                artist = "မြန်မာ တေးဂီတ",
-                album = "အကောင်းဆုံး တေးစု",
-                durationMs = 195000L,
-                filePath = "/storage/emulated/0/Music/moe.mp3",
-                contentUri = Uri.EMPTY,
-                normalizedFileName = "moe",
-                normalizedTitle = "မိုး",
-                isDemo = true
-            ),
-            AudioFileItem(
-                id = 10003L,
-                fileName = "alwan.mp3",
-                title = "အလွမ်း",
-                artist = "မြန်မာ တေးဂီတ",
-                album = "အချစ်သီချင်းများ",
-                durationMs = 240000L,
-                filePath = "/storage/emulated/0/Music/alwan.mp3",
-                contentUri = Uri.EMPTY,
-                normalizedFileName = "alwan",
-                normalizedTitle = "အလွမ်း",
-                isDemo = true
-            ),
-            AudioFileItem(
-                id = 10004L,
-                fileName = "myanmar_melody.mp3",
-                title = "မြန်မာသံစဉ်",
-                artist = "ရိုးရာ တေးဂီတ",
-                album = "ဂန္ထဝင်စုစည်းမှု",
-                durationMs = 230000L,
-                filePath = "/storage/emulated/0/Music/myanmar_melody.mp3",
-                contentUri = Uri.EMPTY,
-                normalizedFileName = "myanmar_melody",
-                normalizedTitle = "မြန်မာသံစဉ်",
-                isDemo = true
-            )
-        )
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -183,8 +128,8 @@ class MusicController private constructor(private val context: Context) {
     private var audioFocusRequest: AudioFocusRequest? = null
 
     init {
-        // Initial quick load with demo tracks, followed by background MediaStore scan
-        populateLookupMap(DEFAULT_DEMO_TRACKS)
+        // Library starts empty; a background MediaStore scan populates it
+        // with real device tracks only (demo tracks removed 2026-10-22).
         scope.launch(Dispatchers.IO) {
             scanExternalStorageAudioFiles()
         }
@@ -196,9 +141,9 @@ class MusicController private constructor(private val context: Context) {
      */
     suspend fun scanExternalStorageAudioFiles(forceRefresh: Boolean = false): List<AudioFileItem> = withContext(Dispatchers.IO) {
         if (!VoicePermissions.hasMediaPermission(context)) {
-            Log.w(TAG, "Media storage permission not granted. Serving default demo songs.")
-            populateLookupMap(DEFAULT_DEMO_TRACKS)
-            return@withContext DEFAULT_DEMO_TRACKS
+            Log.w(TAG, "Media storage permission not granted. Returning empty library (no demo songs).")
+            populateLookupMap(emptyList())
+            return@withContext emptyList()
         }
 
         val scannedList = mutableListOf<AudioFileItem>()
@@ -271,11 +216,8 @@ class MusicController private constructor(private val context: Context) {
             Log.e(TAG, "Exception scanning MediaStore.Audio.Media", e)
         }
 
-        val finalList = if (scannedList.isNotEmpty()) {
-            scannedList + DEFAULT_DEMO_TRACKS
-        } else {
-            DEFAULT_DEMO_TRACKS
-        }
+        // Real scan results only; an empty scan honestly yields an empty list.
+        val finalList = scannedList
 
         populateLookupMap(finalList)
         return@withContext finalList

@@ -1,6 +1,7 @@
 package com.example.audio
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -10,6 +11,17 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
+/**
+ * MusicController tests after the FAKE-09 demo-track removal (2026-10-22).
+ *
+ * The previous version of this test asserted that the built-in DEFAULT_DEMO_TRACKS
+ * ("မာယာ", "မိုး", ...) were always present in the library. Those tracks pointed
+ * at non-existent /demo/music/*.mp3 files and were fabricated library data, so
+ * they were deleted. These tests now assert the honest behavior: the library
+ * contains only real MediaStore scan results (empty under Robolectric), voice
+ * intents against an empty library report NotFound, and the playback state
+ * machine works with an explicit in-test fixture item.
+ */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MusicControllerTest {
@@ -24,35 +36,31 @@ class MusicControllerTest {
     }
 
     @Test
-    fun testLookupMapPopulatedWithFileNames() {
-        val fileNameMap = musicController.fileNameMap
-        assertNotNull(fileNameMap)
-        assertTrue(fileNameMap.isNotEmpty())
-
-        // Check lookup by exact filename
-        assertTrue("Lookup map must contain 'maya.mp3'", fileNameMap.containsKey("maya.mp3"))
-
-        // Check lookup without extension
-        assertTrue("Lookup map must contain 'maya'", fileNameMap.containsKey("maya"))
-
-        val track = fileNameMap["maya.mp3"]
-        assertNotNull(track)
-        assertEquals("မာယာ", track?.title)
-    }
-
-    @Test
-    fun testScanAudioFilesReturnsTracks() = runBlocking {
+    fun testLibraryStartsEmptyWithoutDemoTracks() = runBlocking {
         val tracks = musicController.scanExternalStorageAudioFiles(forceRefresh = true)
         assertNotNull(tracks)
-        assertTrue(tracks.isNotEmpty())
-
-        val trackTitles = tracks.map { it.title }
-        assertTrue(trackTitles.contains("မာယာ"))
+        assertTrue("Library must contain only real MediaStore tracks (none under Robolectric)", tracks.isEmpty())
+        assertTrue(musicController.fileNameMap.isEmpty())
+        assertTrue(musicController.audioFiles.value.isEmpty())
     }
 
     @Test
-    fun testPlaybackControls() {
-        val song = musicController.audioFiles.value.first()
+    fun testPlaybackControlsWithFixtureTrack() {
+        // Explicit fixture (not library data): a non-demo item whose file does
+        // not exist on disk, exercising the controller's playback state flow.
+        val song = AudioFileItem(
+            id = 42L,
+            fileName = "fixture.mp3",
+            title = "Fixture Song",
+            artist = "Test Artist",
+            album = "Test Album",
+            durationMs = 180000L,
+            filePath = "/nonexistent/fixture.mp3",
+            contentUri = Uri.EMPTY,
+            normalizedFileName = "fixture",
+            normalizedTitle = "fixture song",
+            isDemo = false
+        )
 
         val playSuccess = musicController.playSong(song)
         assertTrue(playSuccess)
@@ -75,26 +83,19 @@ class MusicControllerTest {
     }
 
     @Test
-    fun testPlaySongByVoiceIntentExactFileName() = runBlocking {
-        val outcome = musicController.playSongByVoiceIntent("maya.mp3 သီချင်းဖွင့်ပါ")
-        assertTrue(outcome is VoicePlayOutcome.Success)
-        val success = outcome as VoicePlayOutcome.Success
-        assertEquals("မာယာ", success.song.title)
-        assertTrue(success.userMessageMM.contains("မာယာ") || success.userMessageMM.contains("ဖွင့်"))
+    fun testPlaySongByVoiceIntentNotFoundWhenLibraryEmpty() = runBlocking {
+        val byFileName = musicController.playSongByVoiceIntent("maya.mp3 သီချင်းဖွင့်ပါ")
+        assertTrue(byFileName is VoicePlayOutcome.NotFound)
+
+        val byTitle = musicController.playSongByVoiceIntent("မာယာ သီချင်းဖွင့်")
+        assertTrue(byTitle is VoicePlayOutcome.NotFound)
     }
 
     @Test
-    fun testPlaySongByVoiceIntentExactTitle() = runBlocking {
-        val outcome = musicController.playSongByVoiceIntent("မာယာ သီချင်းဖွင့်")
-        assertTrue(outcome is VoicePlayOutcome.Success)
-        val success = outcome as VoicePlayOutcome.Success
-        assertEquals("မာယာ", success.song.title)
-    }
-
-    @Test
-    fun testPlaySongByVoiceIntentGenericFallback() = runBlocking {
+    fun testPlaySongByVoiceIntentGenericRequestNotFoundWhenLibraryEmpty() = runBlocking {
+        // Previously this returned Success by falling back to a demo track.
         val outcome = musicController.playSongByVoiceIntent("သီချင်းဖွင့်")
-        assertTrue(outcome is VoicePlayOutcome.Success)
+        assertTrue(outcome is VoicePlayOutcome.NotFound)
     }
 
     @Test
