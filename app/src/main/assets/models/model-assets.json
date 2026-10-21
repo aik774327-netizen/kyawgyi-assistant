@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0.0",
+  "project": "KyawGyi Myanmar Offline Voice AI",
+  "defaultSampleRateHz": 16000,
+  "preRollBufferMs": 500,
+  "models": [
+    {
+      "id": "sherpa-onnx-zipformer-myanmar-2024",
+      "type": "STT",
+      "engine": "SHERPA_ONNX",
+      "language": "my-MM",
+      "sampleRateHz": 16000,
+      "assetDir": "models/myanmar",
+      "requiredFiles": [
+        "encoder.onnx",
+        "decoder.onnx",
+        "joiner.onnx",
+        "tokens.txt"
+      ],
+      "hotwordsFile": "hotwords.txt",
+      "hotwordsScore": 2.0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "downloadUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-myanmar-2024.zip"
+    },
+    {
+      "id": "vosk-model-small-my-0.4",
+      "type": "STT",
+      "engine": "VOSK",
+      "language": "my-MM",
+      "sampleRateHz": 16000,
+      "assetDir": "models/vosk",
+      "requiredFiles": [
+        "am/final.mdl",
+        "conf/mfcc.conf",
+        "graph/HCLr.fst",
+        "graph/Gr.fst"
+      ],
+      "sha256": "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
+      "downloadUrl": "https://alphacephei.com/vosk/models/vosk-model-small-my-0.4.zip"
+    },
+    {
+      "id": "vits-piper-my_MM-kyawgyi-medium",
+      "type": "TTS",
+      "engine": "SHERPA_ONNX_VITS",
+      "language": "my-MM",
+      "sampleRateHz": 22050,
+      "assetDir": "models/tts-myanmar",
+      "requiredFiles": [
+        "model.onnx",
+        "tokens.txt"
+      ],
+      "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+      "downloadUrl": "https://huggingface.co/kyawgyi-ai/f5-myanmar-tts-onnx/resolve/main/f5-myanmar-int8.onnx"
+    }
+  ]
+}

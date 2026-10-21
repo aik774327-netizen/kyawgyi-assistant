@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Kyaw Gyi AI Voice</string>
+    <string name="accessibility_service_description">Kyaw Gyi Voice Control Service for performing Myanmar hands-free actions and navigation.</string>
+</resources>

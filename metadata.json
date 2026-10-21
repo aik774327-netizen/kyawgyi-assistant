@@ -1,0 +1,6 @@
+{
+  "name": "Kyaw Gyi AI Voice",
+  "description": "Kyaw Gyi (ကျော်ကြီး) AI Voice - Next-Gen Myanmar Voice Assistant with Offline NLU, Acoustic Decoder, System Diagnostics, and Device Controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

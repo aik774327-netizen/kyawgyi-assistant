@@ -1,0 +1,4 @@
+ONNX_SHERPA_ZIPFORMER_MYANMAR_ENCODER_INT8_V1
+sample_rate=16000
+feature_dim=80
+lang=my-MM

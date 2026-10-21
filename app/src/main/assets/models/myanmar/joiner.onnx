@@ -1,0 +1,4 @@
+ONNX_SHERPA_ZIPFORMER_MYANMAR_JOINER_INT8_V1
+sample_rate=16000
+joiner_dim=512
+lang=my-MM

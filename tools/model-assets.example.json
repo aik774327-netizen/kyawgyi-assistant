@@ -1,0 +1,10 @@
+{
+  "sherpa": {
+    "url": "https://YOUR_TRUSTED_HOST/kyawgyi/myanmar-zipformer-v1.zip",
+    "sha256": "PUT_EXACT_64_HEX_SHA256_OF_THE_ZIP_HERE"
+  },
+  "vosk": {
+    "url": "https://YOUR_TRUSTED_HOST/kyawgyi/vosk-model-myanmar-v1.zip",
+    "sha256": "PUT_EXACT_64_HEX_SHA256_OF_THE_ZIP_HERE"
+  }
+}

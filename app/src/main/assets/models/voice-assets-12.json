@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "12.0.0",
+  "description": "KyawGyi Voice AI 12-Requirement Production Asset & Module Manifest",
+  "requirements": [
+    { "id": 1, "name": "Sherpa-ONNX Native JNI", "target": "jniLibs/arm64-v8a/libsherpa-onnx-jni.so" },
+    { "id": 2, "name": "Myanmar Zipformer Transducer ONNX", "target": "assets/models/myanmar/encoder.onnx" },
+    { "id": 3, "name": "Vosk Myanmar Direct PCM Recognizer", "target": "com.kyawgyi.voice.VoskDirectPcmRecognizer" },
+    { "id": 4, "name": "Offline Myanmar Neural / Prosody TTS", "target": "com.kyawgyi.voice.F5MyanmarTtsClient" },
+    { "id": 5, "name": "Neural Wake-Word KWS Adapter", "target": "com.kyawgyi.voice.NeuralWakeWordKwsAdapter" },
+    { "id": 6, "name": "Silero Neural VAD Adapter", "target": "com.kyawgyi.voice.SileroNeuralVadAdapter" },
+    { "id": 7, "name": "Exceptional Burmese G2P Lexicon", "target": "com.kyawgyi.voice.MyanmarPronunciationLexicon" },
+    { "id": 8, "name": "Burmese ASR Homophone Disambiguation Matrix", "target": "com.kyawgyi.voice.MyanmarPronunciationLexicon" },
+    { "id": 9, "name": "Myanmar Cities, Townships & Contacts Hotwords", "target": "com.kyawgyi.voice.ProperNounHotwordDataset" },
+    { "id": 10, "name": "Streaming Sentence TTS Queue", "target": "com.kyawgyi.voice.StreamingTtsQueue" },
+    { "id": 11, "name": "Bluetooth Headset Push-to-Talk Receiver", "target": "com.kyawgyi.voice.HeadsetPushToTalkReceiver" },
+    { "id": 12, "name": "Android 14+ Foreground Microphone Service", "target": "com.kyawgyi.voice.VoiceForegroundService" }
+  ]
+}
