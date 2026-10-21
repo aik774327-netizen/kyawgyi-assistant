@@ -517,7 +517,9 @@ class ApiKeyQuotaManager private constructor(private val context: Context) {
         if (cleanKey.isBlank()) return@withLock
 
         val existingId = keysMap.entries.firstOrNull { it.value.rawKey == cleanKey }?.key
-        val id = existingId ?: "key_${System.currentTimeMillis()}"
+        // UUID, not currentTimeMillis: two keys added within the same
+        // millisecond previously collided and silently overwrote each other.
+        val id = existingId ?: "key_${java.util.UUID.randomUUID()}"
 
         keysMap[id] = ManagedApiKey(
             id = id,

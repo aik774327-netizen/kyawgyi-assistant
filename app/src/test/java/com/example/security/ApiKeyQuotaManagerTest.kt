@@ -33,7 +33,13 @@ class ApiKeyQuotaManagerTest {
 
     @Test
     fun testSecureKeyVaultEncryptionAndMasking() {
-        val vault = SecureKeyVault(context)
+        // Robolectric provides no "AndroidKeyStore" JCA provider, and the
+        // vault now (correctly) fails closed without one - the deterministic
+        // fallback key was removed as FAKE-12. Inject a real platform AES key
+        // through the vault's test-only seam; production code never does this.
+        val vault = SecureKeyVault(context) {
+            javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        }
         val testSecret = "AIzaSySecretApiKey123456789"
 
         val encrypted = vault.encrypt(testSecret)

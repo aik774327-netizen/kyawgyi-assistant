@@ -258,6 +258,12 @@ class SttEngineManagerStreamingTest {
         val kwsEval = sttEngineManager.neuralWakeWordKwsAdapter.evaluateTranscriptOrAcoustic("ဟေး ကျော်ကြီး ဝိုင်ဖိုင် ဖွင့်ပေးပါ")
         assertTrue(kwsEval.wakeWordDetected)
 
+        // Materialize the bundled VAD asset into filesDir first (the adapter
+        // reads it from filesDir; NativeLibraryLoader performs the copy, as
+        // in the Final-10-items test). The other offline models have no asset
+        // to materialize - they were deleted as placeholders.
+        NativeLibraryLoader.getAssetFilePath(context, "models/vad/silero_vad.onnx")
+
         val auditReport = sttEngineManager.voiceAssetManifest.inspectAll12Requirements()
         assertEquals(12, auditReport.totalCount)
         // Honest readiness: offline STT/TTS/KWS models and native JNI libraries
