@@ -725,11 +725,12 @@ private fun ErrorLogDetailedCardItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     Button(
                         onClick = {
+                            // Opening the TTS voice settings does not verify
+                            // that a voice pack was installed, so the blocked
+                            // record is NOT resolved here (FAKE-10, 2026-10-22).
+                            // It clears only via a real live-condition check
+                            // or the user's explicit resolve action.
                             com.example.utils.MyanmarTTSVoicePackManager.getInstance(context).launchVoicePackDownload(context)
-                            ErrorLearningWorkflowEngine.clearFailedMethodWithVerifiedEvidence(
-                                entry.commandKey,
-                                "Activated Universal Burmese Phonetic G2P Fallback & opened TTS Voice Settings"
-                            )
                         },
                         modifier = Modifier
                             .fillMaxWidth()

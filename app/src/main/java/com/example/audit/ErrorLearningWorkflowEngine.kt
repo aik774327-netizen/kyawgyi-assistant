@@ -390,16 +390,13 @@ object ErrorLearningWorkflowEngine {
         appContext = ctx
         prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadFromPersistentStorage()
-        // Auto-resolve any stale TTS_SYNTHESIS blocked records since Universal Burmese Phonetic G2P Fallback is active
-        val staleTtsKeys = failedMethodMemory.keys.filter {
-            it.contains("tts_synthesis") || it.contains("speak_burmese") || it.contains("check_voice_pack")
-        }
-        staleTtsKeys.forEach { key ->
-            clearFailedMethodWithVerifiedEvidence(
-                key,
-                "Verified via MyanmarTTSEngine: Universal Burmese Phonetic G2P Fallback is active on com.google.android.tts"
-            )
-        }
+        // NOTE (FAKE-10, 2026-10-22): initialize() previously auto-resolved
+        // every stale TTS blocked record here, claiming "Verified via
+        // MyanmarTTSEngine: Universal Burmese Phonetic G2P Fallback is active
+        // on com.google.android.tts" - a verification that was never
+        // performed. Blocked records now clear only through a real live
+        // check (verifyLiveEnvironmentConditions), a verified successful
+        // execution, or an explicit user action in the log viewer.
     }
 
     @Synchronized

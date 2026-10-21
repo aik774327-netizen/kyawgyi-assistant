@@ -320,14 +320,12 @@ class MyanmarTTSEngine(
                 if (phoneticText.isNotBlank()) {
                     Log.i(TAG, "Native my-MM pack unavailable; vocalizing via Universal Burmese Phonetic G2P Fallback: $phoneticText")
                     tts?.language = Locale.US
-                    com.example.audit.ErrorLearningWorkflowEngine.clearFailedMethodWithVerifiedEvidence(
-                        "tts_synthesis_speak_burmese",
-                        "Verified Universal Burmese Phonetic G2P Fallback active on com.google.android.tts"
-                    )
-                    com.example.audit.ErrorLearningWorkflowEngine.clearFailedMethodWithVerifiedEvidence(
-                        "tts_synthesis_check_voice_pack",
-                        "Verified Universal Burmese Phonetic G2P Fallback active on com.google.android.tts"
-                    )
+                    // The phonetic-G2P fallback path executed for this
+                    // utterance. That does NOT verify that any previously
+                    // blocked TTS method's conditions changed, so no
+                    // "verified evidence" resolution is recorded here
+                    // (FAKE-10, 2026-10-22).
+                    Log.i(TAG, "Phonetic G2P fallback used for utterance; no voice-pack verification is claimed.")
                     queue.add(Pair(phoneticText, onEndCallback))
                     if (!isSpeaking) {
                         processQueue()
