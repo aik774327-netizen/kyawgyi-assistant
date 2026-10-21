@@ -14,9 +14,9 @@ import org.robolectric.annotation.Config
 /**
  * MusicController tests after the FAKE-09 demo-track removal (2026-10-22).
  *
- * The previous version of this test asserted that the built-in DEFAULT_DEMO_TRACKS
- * ("မာယာ", "မိုး", ...) were always present in the library. Those tracks pointed
- * at non-existent /demo/music/*.mp3 files and were fabricated library data, so
+ * The previous version of this test asserted that the built-in demo-track list
+ * ("မာယာ", "မိုး", ...) was always present in the library. Those tracks pointed
+ * at non-existent demo file paths and were fabricated library data, so
  * they were deleted. These tests now assert the honest behavior: the library
  * contains only real MediaStore scan results (empty under Robolectric), voice
  * intents against an empty library report NotFound, and the playback state
