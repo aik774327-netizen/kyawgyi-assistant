@@ -98,6 +98,14 @@ class VoiceSessionManager(
     private var lastMicToggleTime = 0L
     private var accumulatedSpeechBuffer = StringBuilder()
 
+    /**
+     * Real confidence reported by the SpeechRecognizer for the latest final
+     * result (Bundle CONFIDENCE_SCORES), or null when the recognizer did not
+     * supply one. Before 2026-10-22 a fixed 0.95f was fabricated for every
+     * final transcript (FAKE-11).
+     */
+    private var lastRecognitionConfidence: Float? = null
+
     // Active Jobs
     private var initialSilenceTimeoutJob: Job? = null
     private var silenceConfirmationJob: Job? = null
@@ -414,8 +422,11 @@ class VoiceSessionManager(
                 notifyEvent(VoiceSessionEvent.COMMAND_FINALIZED, normalizedText)
 
                 val listenersCopy = synchronized(listeners) { ArrayList(listeners) }
+                // Honest confidence: the recognizer's own score when it
+                // provided one, otherwise 0.0f = unknown (never a fixed 0.95f).
+                val reportedConfidence = lastRecognitionConfidence ?: 0.0f
                 for (l in listenersCopy) {
-                    l.onFinalTranscript(normalizedText, 0.95f)
+                    l.onFinalTranscript(normalizedText, reportedConfidence)
                 }
 
                 // Execute Command Pipeline via SmartRouter & Local NLU
@@ -556,6 +567,10 @@ class VoiceSessionManager(
         override fun onResults(results: Bundle?) {
             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             val recognized = matches?.firstOrNull() ?: ""
+            // Capture the recognizer's real confidence for the top match.
+            lastRecognitionConfidence = results
+                ?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+                ?.firstOrNull()
             if (recognized.isNotBlank()) {
                 accumulatedSpeechBuffer.clear()
                 accumulatedSpeechBuffer.append(recognized)
