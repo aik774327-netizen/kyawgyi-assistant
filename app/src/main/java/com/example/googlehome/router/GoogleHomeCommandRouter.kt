@@ -26,8 +26,8 @@ class GoogleHomeCommandRouter(private val context: Context) {
         val clean = spokenText.trim().lowercase()
         val normalized = BurmesePhoneticNormalizer.normalizeBurmeseText(clean)
 
-        // Ensure devices are seeded in Room DB
-        deviceService.syncDiscoveredDevices()
+        // No seeding: commands run only against devices genuinely stored in
+        // the local Room DB (no discovery source exists - see FAKE-08).
 
         // 1. Check if user is asking for Google Home app directly
         if (clean.contains("google home") || clean.contains("ဂူဂဲလ်ဟုမ်း") || clean.contains("ဂူဂယ်ဟုမ်း")) {

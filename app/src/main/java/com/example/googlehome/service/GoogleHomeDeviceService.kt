@@ -30,83 +30,20 @@ class GoogleHomeDeviceService(private val context: Context) {
     val executionState: StateFlow<SmartHomeExecutionState> = executionManager.executionState
 
     /**
-     * Discovery / Sync Google Home Devices (HomeGraph / Matter / Local Mesh)
-     * Persists discovered devices to local Room Database
+     * Returns the locally stored smart-home devices. There is NO discovery
+     * source (HomeGraph / Matter / local mesh) in this app, so nothing is
+     * discovered and nothing is inserted.
      */
     suspend fun syncDiscoveredDevices(): List<SmartHomeDeviceEntity> = withContext(Dispatchers.IO) {
-        Log.i(TAG, "Starting Google Home Device Discovery (SYNC intent)...")
-
-        // Seed or sync standard smart devices for Myanmar households
-        val discoveredList = listOf(
-            SmartHomeDeviceEntity(
-                deviceId = "device_living_light_1",
-                name = "ဧည့်ခန်း မီးလုံး (Main Light)",
-                room = "ဧည့်ခန်း (Living Room)",
-                deviceType = "LIGHT",
-                isOn = true,
-                brightness = 90,
-                burmeseTriggerPhrases = "ဧည့်ခန်းမီး, ဧည့်ခန်း မီး, living room light",
-                traitType = "action.devices.traits.Brightness",
-                apiEndpoint = "https://homegraph.googleapis.com/v1/devices/device_living_light_1/execute"
-            ),
-            SmartHomeDeviceEntity(
-                deviceId = "device_living_fan_1",
-                name = "ဧည့်ခန်း ပန်ကာ (Fan)",
-                room = "ဧည့်ခန်း (Living Room)",
-                deviceType = "FAN",
-                isOn = false,
-                brightness = 100,
-                burmeseTriggerPhrases = "ဧည့်ခန်းပန်ကာ, ပန်ကာ, living room fan",
-                traitType = "action.devices.traits.FanSpeed",
-                apiEndpoint = "https://homegraph.googleapis.com/v1/devices/device_living_fan_1/execute"
-            ),
-            SmartHomeDeviceEntity(
-                deviceId = "device_bed_ac_1",
-                name = "အိပ်ခန်း လေအေးပေးစက် (Aircon)",
-                room = "အိပ်ခန်း (Bedroom)",
-                deviceType = "AC",
-                isOn = false,
-                temperature = 24,
-                burmeseTriggerPhrases = "အိပ်ခန်းအဲကွန်း, အဲကွန်း, aircon, bedroom ac",
-                traitType = "action.devices.traits.TemperatureSetting",
-                apiEndpoint = "https://homegraph.googleapis.com/v1/devices/device_bed_ac_1/execute"
-            ),
-            SmartHomeDeviceEntity(
-                deviceId = "device_bed_nightlight",
-                name = "အိပ်ခန်း ညမီး (Nightlight)",
-                room = "အိပ်ခန်း (Bedroom)",
-                deviceType = "LIGHT",
-                isOn = false,
-                brightness = 40,
-                burmeseTriggerPhrases = "ညမီး, အိပ်ခန်းမီး, night light",
-                traitType = "action.devices.traits.Brightness",
-                apiEndpoint = "https://homegraph.googleapis.com/v1/devices/device_bed_nightlight/execute"
-            ),
-            SmartHomeDeviceEntity(
-                deviceId = "device_kitchen_plug_1",
-                name = "မီးဖိုချောင် စမတ်ပလပ် (Smart Plug)",
-                room = "မီးဖိုချောင် (Kitchen)",
-                deviceType = "SWITCH",
-                isOn = false,
-                burmeseTriggerPhrases = "မီးဖိုချောင်ပလပ်, ရေနွေးအိုး, smart plug",
-                traitType = "action.devices.traits.OnOff",
-                apiEndpoint = "https://homegraph.googleapis.com/v1/devices/device_kitchen_plug_1/execute"
-            ),
-            SmartHomeDeviceEntity(
-                deviceId = "device_living_tv_1",
-                name = "စမတ် တီဗွီ (Smart TV)",
-                room = "ဧည့်ခန်း (Living Room)",
-                deviceType = "TV",
-                isOn = true,
-                burmeseTriggerPhrases = "တီဗွီ, tv, စမတ်တီဗွီ, smart tv",
-                traitType = "action.devices.traits.AppSelector",
-                apiEndpoint = "https://homegraph.googleapis.com/v1/devices/device_living_tv_1/execute"
-            )
-        )
-
-        deviceDao.insertAll(discoveredList)
-        Log.i(TAG, "Device discovery synced ${discoveredList.size} devices into Room database.")
-        discoveredList
+        // No real discovery source exists in this app: there is no HomeGraph,
+        // Matter, or local-mesh client, and GoogleHomeManager only opens the
+        // Google Home app / Assistant. The previous implementation fabricated
+        // six household devices and persisted them to Room as if they had
+        // been discovered (FAKE-08, removed 2026-10-22). Return only the
+        // devices genuinely stored locally; insert nothing.
+        val stored = deviceDao.getAllDevices()
+        Log.i(TAG, "No Google Home discovery source configured; returning ${stored.size} locally stored device(s), inserting none.")
+        stored
     }
 
     suspend fun getDeviceById(deviceId: String): SmartHomeDeviceEntity? = withContext(Dispatchers.IO) {

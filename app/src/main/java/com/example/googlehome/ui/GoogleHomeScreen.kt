@@ -69,10 +69,6 @@ fun GoogleHomeScreen(
     var showAssistiveTouchMenu by remember { mutableStateOf(false) }
     var customAssistantCommand by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) {
-        deviceService.syncDiscoveredDevices()
-    }
-
     Scaffold(
         modifier = modifier
             .fillMaxSize()
@@ -209,7 +205,7 @@ fun GoogleHomeScreen(
                             onClick = {
                                 coroutineScope.launch {
                                     val synced = deviceService.syncDiscoveredDevices()
-                                    Toast.makeText(context, "စက်ပစ္စည်း ${synced.size} ခု ပြန်လည်ရှာဖွေပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "သိမ်းထားသော စက်ပစ္စည်း ${synced.size} ခု (ရှာဖွေရေးစနစ် ချိတ်ဆက်ထားခြင်း မရှိပါ)", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.testTag("refresh_devices_btn")
@@ -224,6 +220,19 @@ fun GoogleHomeScreen(
                 }
 
                 // 6. Smart Home Device List Items with Dimming/Power toggles
+                if (devices.isEmpty()) {
+                    item {
+                        Text(
+                            text = "စက်ပစ္စည်း မရှိသေးပါ — Google Home discovery ချိတ်ဆက်ထားခြင်း မရှိသောကြောင့် စက်ပစ္စည်း အသစ် ရှာဖွေ၍ မရပါ",
+                            fontSize = 13.sp,
+                            color = AngelTextSecondary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp)
+                                .testTag("google_home_empty_state")
+                        )
+                    }
+                }
                 items(items = devices, key = { it.deviceId }) { dev ->
                     SmartDeviceRepositoryCard(
                         device = dev,

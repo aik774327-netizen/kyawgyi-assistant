@@ -42,10 +42,6 @@ fun GoogleHomeAssistiveTouchMenu(
     val coroutineScope = rememberCoroutineScope()
     val devices by service.devicesFlow.collectAsState(initial = emptyList())
 
-    LaunchedEffect(Unit) {
-        service.syncDiscoveredDevices()
-    }
-
     Card(
         modifier = modifier
             .fillMaxWidth()
