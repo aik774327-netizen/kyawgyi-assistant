@@ -126,8 +126,12 @@ class ApiKeyQuotaManager private constructor(private val context: Context) {
         }
     }
 
-    private fun saveKeysToVault() {
-        try {
+    /**
+     * Persists the key pool. Returns false when secure storage is unavailable
+     * so callers never report a save that did not happen (FAKE-12).
+     */
+    private fun saveKeysToVault(): Boolean {
+        return try {
             val jsonArr = JSONArray()
             keysMap.values.forEach { key ->
                 jsonArr.put(key.toJson())
@@ -135,8 +139,10 @@ class ApiKeyQuotaManager private constructor(private val context: Context) {
             vault.saveEncrypted(VAULT_KEY_POOL, jsonArr.toString())
             vault.saveString(VAULT_ACTIVE_KEY_ID, activeKeyId)
             vault.saveString(VAULT_AUTO_REVERT, autoRevertToFree.toString())
+            true
         } catch (e: Exception) {
             Log.e(TAG, "Error saving keys to vault: ${e.message}", e)
+            false
         }
     }
 
@@ -323,7 +329,18 @@ class ApiKeyQuotaManager private constructor(private val context: Context) {
             }
 
             if (keyToUse == null || !keyToUse.isAvailable) {
-                val err = "No available API keys in pool (all in cooldown or unconfigured). HTTP 429 Quota Exhausted."
+                if (mutex.withLock { keysMap.isEmpty() }) {
+                    // No key has ever been configured. Claiming "HTTP 429 Quota
+                    // Exhausted" here (the pre-2026-10-22 behavior) was false:
+                    // no request was ever sent. Report the real problem.
+                    val err = com.example.data.GeminiApiService.NO_API_KEY_MESSAGE
+                    Log.e(TAG, "No API keys configured in pool: $err")
+                    throw com.example.data.NoApiKeyConfiguredException(err)
+                }
+                // Keys exist but every one is in cooldown after real quota
+                // errors. Say exactly that - do not claim an HTTP 429 response
+                // was received for this attempt.
+                val err = "All configured API keys are in cooldown (all in cooldown after quota errors). Please wait for cooldown to expire or add another key."
                 Log.e(TAG, err)
                 throw com.example.data.GeminiQuotaExceededException(err)
             }
@@ -512,8 +529,12 @@ class ApiKeyQuotaManager private constructor(private val context: Context) {
             minuteLimit = if (tier == ApiKeyTier.FREE_TIER) 15 else 60
         )
 
-        recordAlert(label, "Added/Updated API key successfully in secure vault.", AlertSeverity.INFO)
-        saveKeysToVault()
+        val saved = saveKeysToVault()
+        if (saved) {
+            recordAlert(label, "Added/Updated API key successfully in secure vault.", AlertSeverity.INFO)
+        } else {
+            recordAlert(label, "API key was NOT saved: secure storage unavailable. The key is only in memory for this session.", AlertSeverity.CRITICAL)
+        }
         updateOverviewState()
     }
 

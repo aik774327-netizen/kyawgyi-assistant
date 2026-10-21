@@ -609,7 +609,10 @@ class AngelViewModel(application: Application) : AndroidViewModel(application), 
                     replyText = aiReply
                     thoughtChain = chain
                 } catch (e: Exception) {
-                    if (com.example.data.GeminiApiService.isQuotaOrRateLimitException(e)) {
+                    if (com.example.data.GeminiApiService.isNoApiKeyException(e)) {
+                        replyText = com.example.data.GeminiApiService.NO_API_KEY_MESSAGE
+                        thoughtChain = "Error: NO_API_KEY_CONFIGURED"
+                    } else if (com.example.data.GeminiApiService.isQuotaOrRateLimitException(e)) {
                         replyText = com.example.data.GeminiApiService.GEMINI_QUOTA_ERROR_MESSAGE
                         thoughtChain = "HTTP 429 RESOURCE_EXHAUSTED - Quota limit reached"
                     } else {

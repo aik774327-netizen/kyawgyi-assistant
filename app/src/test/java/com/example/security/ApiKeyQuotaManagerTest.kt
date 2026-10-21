@@ -200,4 +200,38 @@ class ApiKeyQuotaManagerTest {
             com.example.data.GeminiApiService.GEMINI_QUOTA_ERROR_MESSAGE
         )
     }
+
+    @Test
+    fun testEmptyPoolThrowsNoApiKeyConfiguredNotFake429() = runBlocking {
+        // Empty the pool completely (add a temp key so the default key can be
+        // removed, then remove the temp key as well).
+        quotaManager.addOrUpdateKey(
+            rawKey = "AIzaSyTempKeyForPoolEmptying00000000",
+            label = "Temp Pool Key",
+            tier = ApiKeyTier.FREE_TIER,
+            dailyLimit = 100
+        )
+        val defaultKey = quotaManager.poolState.value.keysList.firstOrNull { it.id == ApiKeyQuotaManager.DEFAULT_PRIMARY_ID }
+        if (defaultKey != null) {
+            quotaManager.removeKey(defaultKey.id)
+        }
+        quotaManager.poolState.value.keysList.map { it.id }.forEach { quotaManager.removeKey(it) }
+        assertTrue(quotaManager.poolState.value.keysList.isEmpty())
+
+        var caughtException: Exception? = null
+        try {
+            quotaManager.executeWithRetry<String>(
+                operationName = "No Key Configured",
+                maxRetries = 1
+            ) { _ -> "should never run" }
+        } catch (e: Exception) {
+            caughtException = e
+        }
+
+        // FAKE-07 regression: an empty pool must NOT fabricate an HTTP 429.
+        assertNotNull(caughtException)
+        assertTrue(caughtException is com.example.data.NoApiKeyConfiguredException)
+        assertTrue(com.example.data.GeminiApiService.isNoApiKeyException(caughtException!!))
+        assertFalse(com.example.data.GeminiApiService.isQuotaOrRateLimitException(caughtException!!))
+    }
 }

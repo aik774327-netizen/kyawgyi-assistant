@@ -11,7 +11,6 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * SecureKeyVault
@@ -20,7 +19,27 @@ import javax.crypto.spec.SecretKeySpec
  * for securely persisting sensitive API keys in the app sandbox.
  * Keys are never stored in plaintext and are masked in UI and diagnostic logs.
  */
-class SecureKeyVault(private val context: Context) {
+/**
+ * Thrown when the AndroidKeyStore master key cannot be created or retrieved.
+ * The vault fails CLOSED in that case: before 2026-10-22 it silently fell
+ * back to a deterministic key derived from a hardcoded seed string plus the
+ * package name, which anyone could reproduce to decrypt stored API keys
+ * (FAKE-12).
+ */
+class SecureStorageUnavailableException(
+    message: String,
+    cause: Throwable? = null
+) : Exception(message, cause)
+
+class SecureKeyVault(
+    private val context: Context,
+    /**
+     * Test seam only: when non-null, supplies the AES key directly instead of
+     * the AndroidKeyStore (e.g. JVM/Robolectric environments without a working
+     * AndroidKeyStore provider). Production code never passes this.
+     */
+    private val secretKeyProvider: (() -> SecretKey)? = null
+) {
 
     companion object {
         private const val TAG = "SecureKeyVault"
@@ -70,37 +89,49 @@ class SecureKeyVault(private val context: Context) {
                 Log.d(TAG, "Hardware master key generated successfully in AndroidKeyStore")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "AndroidKeyStore init fallback: ${e.message}")
+            // No fallback key exists anymore (FAKE-12): getSecretKey() will
+            // throw SecureStorageUnavailableException when the key is needed.
+            Log.w(TAG, "AndroidKeyStore init failed; secure storage unavailable: ${e.message}")
         }
     }
 
     private fun getSecretKey(): SecretKey {
-        return try {
+        secretKeyProvider?.let { return it() }
+        try {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
             val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
-            entry?.secretKey ?: generateFallbackKey()
+            if (entry?.secretKey != null) return entry.secretKey
         } catch (e: Exception) {
-            Log.w(TAG, "Failed retrieving from KeyStore, using deterministic fallback: ${e.message}")
-            generateFallbackKey()
+            throw SecureStorageUnavailableException(
+                "AndroidKeyStore unavailable; secure storage cannot be used", e
+            )
         }
-    }
-
-    private fun generateFallbackKey(): SecretKey {
-        // Deterministic package-bound fallback key for environments where KeyStore is constrained (e.g. JVM/Robolectric)
-        val seed = ("KyawGyiVaultSecret_" + context.packageName).toByteArray(StandardCharsets.UTF_8)
-        val keyBytes = ByteArray(32)
-        for (i in keyBytes.indices) {
-            keyBytes[i] = seed[i % seed.size]
+        // Key missing (e.g. first run raced with init failure): try once to create it.
+        ensureMasterKey()
+        try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+            if (entry?.secretKey != null) return entry.secretKey
+        } catch (e: Exception) {
+            throw SecureStorageUnavailableException(
+                "AndroidKeyStore unavailable; secure storage cannot be used", e
+            )
         }
-        return SecretKeySpec(keyBytes, "AES")
+        throw SecureStorageUnavailableException(
+            "AndroidKeyStore master key could not be created or retrieved; secure storage unavailable"
+        )
     }
 
     /**
      * Encrypts plaintext string using AES-256 GCM.
+     *
+     * Throws [SecureStorageUnavailableException] when encryption cannot be
+     * performed: silently returning "" (the pre-2026-10-22 behavior) made
+     * callers believe a key had been stored when nothing was persisted.
      */
     fun encrypt(plainText: String): String {
         if (plainText.isEmpty()) return ""
-        return try {
+        try {
             val secretKey = getSecretKey()
             val cipher = Cipher.getInstance(AES_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)
@@ -111,10 +142,11 @@ class SecureKeyVault(private val context: Context) {
             val combined = ByteArray(iv.size + cipherText.size)
             System.arraycopy(iv, 0, combined, 0, iv.size)
             System.arraycopy(cipherText, 0, combined, iv.size, cipherText.size)
-            Base64.encodeToString(combined, Base64.NO_WRAP)
+            return Base64.encodeToString(combined, Base64.NO_WRAP)
+        } catch (e: SecureStorageUnavailableException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Encryption failed: ${e.message}")
-            ""
+            throw SecureStorageUnavailableException("Encryption failed: ${e.message}", e)
         }
     }
 
@@ -139,8 +171,15 @@ class SecureKeyVault(private val context: Context) {
 
             val plainBytes = cipher.doFinal(cipherText)
             String(plainBytes, StandardCharsets.UTF_8)
+        } catch (e: SecureStorageUnavailableException) {
+            // Keystore itself is broken: surface it honestly instead of
+            // pretending the stored value is simply absent.
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Decryption failed: ${e.message}")
+            // Ciphertext cannot be authenticated/decrypted - e.g. data written
+            // under the removed deterministic fallback key (FAKE-12). Treat as
+            // unreadable/absent; the user must re-enter the API key.
+            Log.e(TAG, "Decryption failed (stored data unreadable): ${e.message}")
             ""
         }
     }

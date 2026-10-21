@@ -20,12 +20,32 @@ class GeminiQuotaExceededException(
     cause: Throwable? = null
 ) : IOException(message, cause)
 
+/**
+ * Thrown when a Gemini call is attempted but NO API key is configured at all.
+ * Deliberately distinct from [GeminiQuotaExceededException]: before
+ * 2026-10-22 the empty-pool case fabricated an "HTTP 429 Quota Exhausted"
+ * error even though no request had ever been sent (FAKE-07).
+ */
+class NoApiKeyConfiguredException(
+    message: String = GeminiApiService.NO_API_KEY_MESSAGE,
+    cause: Throwable? = null
+) : IOException(message, cause)
+
+
 class GeminiApiService(private val context: Context? = null) {
 
     companion object {
         private const val TAG = "GeminiApiService"
         private const val MODEL_NAME = "gemini-3.5-flash"
         const val GEMINI_QUOTA_ERROR_MESSAGE = "Gemini API Quota ပြည့်သွားပါသဖြင့် ခေတ္တစောင့်ဆိုင်းပါ သို့မဟုတ် ကိုယ်ပိုင် API Key ထည့်ပါ"
+        const val NO_API_KEY_MESSAGE = "API key မထည့်ရသေးပါ — Settings မှာ Gemini API Key ထည့်ပါ"
+        const val CONNECTION_ERROR_MESSAGE = "Gemini ချိတ်ဆက်၍ မရပါ — API key ထည့်ထားခြင်း ရှိမရှိနဲ့ internet ကို စစ်ပါ"
+
+        fun isNoApiKeyException(e: Throwable): Boolean {
+            if (e is NoApiKeyConfiguredException) return true
+            return e.cause?.let { isNoApiKeyException(it) } ?: false
+        }
+
 
         fun isQuotaOrRateLimitException(e: Throwable): Boolean {
             val msg = (e.message ?: "").lowercase()
@@ -73,6 +93,14 @@ class GeminiApiService(private val context: Context? = null) {
                     )
                 }
             } catch (e: Exception) {
+                if (isNoApiKeyException(e)) {
+                    Log.w(TAG, "No Gemini API key configured: ${e.message}")
+                    return@withContext Pair(
+                        NO_API_KEY_MESSAGE,
+                        "Error: NO_API_KEY_CONFIGURED - no Gemini API key has been added in Settings"
+                    )
+                }
+
                 if (isQuotaOrRateLimitException(e)) {
                     Log.w(TAG, "Gemini API 429 Quota Exhausted: ${e.message}")
                     return@withContext Pair(
@@ -80,8 +108,14 @@ class GeminiApiService(private val context: Context? = null) {
                         "Error 429: RESOURCE_EXHAUSTED - Gemini API Quota ပြည့်သွားပါပြီ"
                     )
                 }
-                Log.w(TAG, "QuotaManager execution fell back to local companion: ${e.message}")
-                return@withContext generateLocalCompanionResponse(prompt, mode, engine, history)
+                // Honest failure: never substitute canned local replies for a
+                // real Gemini response (FAKE-06, removed 2026-10-22).
+                Log.w(TAG, "Gemini request failed: ${e.message}")
+                return@withContext Pair(
+                    CONNECTION_ERROR_MESSAGE,
+                    "Error: ${e.javaClass.simpleName}: ${e.message}"
+                )
+
             }
         }
 
@@ -89,7 +123,10 @@ class GeminiApiService(private val context: Context? = null) {
         val apiKey = BuildConfig.GEMINI_API_KEY
         val cleanApiKey = if (apiKey != "MY_GEMINI_API_KEY" && apiKey.isNotBlank()) apiKey else null
         if (cleanApiKey == null) {
-            return@withContext generateLocalCompanionResponse(prompt, mode, engine, history)
+            return@withContext Pair(
+                NO_API_KEY_MESSAGE,
+                "Error: NO_API_KEY_CONFIGURED - no Gemini API key has been added in Settings"
+            )
         }
 
         try {
@@ -110,7 +147,10 @@ class GeminiApiService(private val context: Context? = null) {
                 )
             }
             Log.e(TAG, "Direct Gemini call failed: ${e.message}")
-            generateLocalCompanionResponse(prompt, mode, engine, history)
+            Pair(
+                CONNECTION_ERROR_MESSAGE,
+                "Error: ${e.javaClass.simpleName}: ${e.message}"
+            )
         }
     }
 
@@ -216,7 +256,9 @@ class GeminiApiService(private val context: Context? = null) {
             }
         }
 
-        return generateLocalCompanionResponse(prompt, mode, engine, history)
+        // A 200 response with no usable candidate text is a failure, not an
+        // occasion to invent a reply locally.
+        throw IOException("Gemini returned an empty response")
     }
 
     suspend fun testKeyConnection(testKey: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
@@ -258,78 +300,5 @@ class GeminiApiService(private val context: Context? = null) {
         } catch (e: Exception) {
             Pair(false, "Network error: ${e.message}")
         }
-    }
-
-    fun generateLocalCompanionResponse(
-        prompt: String,
-        mode: String,
-        engine: String,
-        history: List<ChatMessageEntity> = emptyList()
-    ): Pair<String, String?> {
-        val lower = prompt.lowercase()
-        val mood = com.example.cognitive.KyawGyiSystemPersona.detectUserMood(prompt)
-        val lastUserTopic = history.lastOrNull { it.role == "user" && it.content != prompt }?.content?.take(40)
-
-        val thoughtChain = if (engine == "Brain Core" || mode == "EXPERT") {
-            "• Mood & Tone Detection: ${mood.labelMM}\n" +
-                "• Context Recall: ${lastUserTopic ?: "Fresh conversation turn"}\n" +
-                "• Persona Policy: Warm, Grounded, Direct & Non-Robotic Burmese"
-        } else null
-
-        val responseText = when {
-            // 4. Boundaries & Safety — Transparency when asked about AI identity
-            lower.contains("ဘယ်သူလဲ") || lower.contains("who are you") || lower.contains("ai လား") || lower.contains("လူလား") -> {
-                "ကျွန်တော်က သင့်ရဲ့ နေ့စဉ်ဘဝနဲ့ နည်းပညာကိစ္စတွေမှာ အတူတိုင်ပင်ဖော်၊ ကူညီဖော်ဖြစ်တဲ့ Personal AI Companion (ကျော်ကြီး / Nova) ပါ။ AI တစ်ခုဆိုပေမဲ့ သူငယ်ချင်းကောင်းတစ်ယောက်လို ပွင့်ပွင့်လင်းလင်းနဲ့ နွေးနွေးထွေးထွေး အမြဲရှိနေပေးမှာပါ။ ဒီနေ့ရော ဘာတွေ စိတ်ကူးထားတာရှိလဲ ပြောပြပါဦးနော်။"
-            }
-
-            // 4. Boundaries & Safety — Medical / Legal Well-being Guardrail
-            mood == com.example.cognitive.KyawGyiSystemPersona.UserMoodState.MEDICAL_OR_LEGAL_BOUNDARY -> {
-                "ဒီကိစ္စနဲ့ ပတ်သက်ပြီး သင်စိုးရိမ်နေမယ်ဆိုတာ နားလည်ပါတယ်။ ဒါပေမဲ့ ကျန်းမာရေးစစ်ဆေးချက် (Medical diagnosis) ဒါမှမဟုတ် ဥပဒေကြောင်းအရ အတည်ပြုဆုံးဖြတ်ချက်တွေက အရမ်းအရေးကြီးတာမို့ ကျွန်တော့်ဘက်က တိုက်ရိုက် ဆုံးဖြတ်မပေးချင်ပါဘူး။ သက်ဆိုင်ရာ ဆရာဝန် ဒါမှမဟုတ် ကျွမ်းကျင်ပညာရှင်နဲ့ တိုက်ရိုက်တိုင်ပင်ကြည့်ဖို့ အကြံပေးချင်ပါတယ်။ လောလောဆယ် သက်သောင့်သက်သာဖြစ်အောင် ဘာလေးတွေ ကူညီပေးရမလဲ?"
-            }
-
-            // 2. Dynamic Adaptability — Stressed / Tired / Overwhelmed
-            mood == com.example.cognitive.KyawGyiSystemPersona.UserMoodState.STRESSED -> {
-                "အင်း... အတော်လေး ပင်ပန်းပြီး စိတ်ဖိစီးနေပုံပဲနော်။ အရင်ဆုံး အသက်ကို ဖြည်းဖြည်းချင်း ရှူသွင်းရှူထုတ်လေး လုပ်ပြီး ခဏလောက် အနားယူလိုက်ပါဦး။ အရာအားလုံးကို တစ်ပြိုင်တည်း ဖြေရှင်းဖို့ မလိုပါဘူး၊ အရေးအကြီးဆုံး တစ်ခုချင်းစီကနေ ကျွန်တော်တို့ အတူတူ စဉ်းစားကြတာပေါ့။ အခု သင့်စိတ်ထဲ အလေးလံဆုံးဖြစ်နေတာက ဘယ်အပိုင်းလဲ ပြောပြချင်လား?"
-            }
-
-            // 2. Dynamic Adaptability — Cheerful / Playful
-            mood == com.example.cognitive.KyawGyiSystemPersona.UserMoodState.CHEERFUL -> {
-                "အိုးဟိုး! အသံကြားရတာနဲ့တင် ဒီနေ့ အရမ်းတက်ကြွပြီး ပျော်နေမှန်း သိသာတယ်နော်! အဲဒီလို အဆင်ပြေနေတာ ကြားရတာ ကျွန်တော်လည်း အတူတူ ပျော်မိပါတယ်။ ဒီနေ့ ဘာသတင်းကောင်းတွေများ ရှိလို့လဲ၊ ကျွန်တော့်ကိုလည်း မျှဝေပါဦး!"
-            }
-
-            // 2. Dynamic Adaptability — Problem Solving / Technical / Analytical
-            mood == com.example.cognitive.KyawGyiSystemPersona.UserMoodState.PROBLEM_SOLVING || mode == "EXPERT" -> {
-                "ဒီကိစ္စကို ရှင်းရှင်းလင်းလင်းနဲ့ လက်တွေ့ကျကျ ချဉ်းကပ်ကြည့်ရအောင်—\n\n" +
-                    "၁။ **အဓိက ပြဿနာ (Root Cause & Context):** \"$prompt\" မှာ အဓိက ကြုံနေရတဲ့ အချက်ကို အရင်ဆုံး ပိုင်းခြားသတ်မှတ်ပါမယ်။\n" +
-                    "၂။ **လက်တွေ့ အကြံပြုချက် (Actionable Approach):** အရိုးရှင်းဆုံးနဲ့ အထိရောက်ဆုံး နည်းလမ်းကနေ အဆင့်လိုက် (Step-by-step) စမ်းသပ်သွားတာက အမှားအနည်းဆုံး ဖြစ်ပါလိမ့်မယ်။\n" +
-                    "၃။ **ပွင့်လင်းသော သုံးသပ်ချက် (Candid Feedback):** အကုန်လုံးကို တစ်ခါတည်း ပြင်တာထက် အဓိက bottleneck ကို အရင်ရှင်းတာက အချိန်ပိုသက်သာစေပါတယ်။\n\n" +
-                    "ဘယ်အပိုင်းကို အရင်ဆုံး အသေးစိတ် ခွဲခြမ်းစိတ်ဖြာကြည့်ကြမလဲ?"
-            }
-
-            // Warm Natural Greeting (No robotic meta-announcements)
-            lower.contains("hello") || lower.contains("မင်္ဂလာပါ") || lower.contains("hi") || lower.contains("နေကောင်းလား") -> {
-                val contextHint = if (lastUserTopic != null) " ခုနက ပြောခဲ့တဲ့ \"$lastUserTopic\" ကိစ္စရော အဆင်ပြေရဲ့လား?" else ""
-                "ဟေး... မင်္ဂလာပါဗျာ! ကျွန်တော် အဆင်သင့်ရှိနေပါတယ်။$contextHint ဒီနေ့ ဘာတွေ လုပ်ဖြစ်နေလဲ၊ စိတ်ထဲရှိတာ ပေါ့ပေါ့ပါးပါး ပြောပြပါဦးနော်။"
-            }
-
-            mode == "CREATIVE" -> {
-                "ဒီစိတ်ကူးလေးက တော်တော်လေး စိတ်ဝင်စားဖို့ ကောင်းတယ်! သမားရိုးကျ ပုံစံခွက်ထဲကနေ ဖောက်ထွက်ပြီး ပိုဆန်းသစ်တဲ့ ရှုထောင့်ကနေ စဉ်းစားကြည့်မယ်ဆိုရင် အိုင်ဒီယာအသစ်တွေ အများကြီး ထွက်လာနိုင်တယ်။ သင့်စိတ်ထဲမှာ အဓိက ပေါ်လွင်စေချင်တဲ့ ခံစားချက် ဒါမှမဟုတ် ရည်ရွယ်ချက်က ဘာဖြစ်မလဲ?"
-            }
-
-            mode == "TEACHING" -> {
-                "ဒါကို နားလည်ရ အလွယ်ဆုံးဖြစ်အောင် နေ့စဉ်သုံး ဥပမာလေးနဲ့ ချိတ်ဆက်ပြီး ကြည့်ကြရအောင်။ အခြေခံ သဘောတရား (Core Concept) ကို အရင်ဆုံး မြင်သွားပြီဆိုရင် လက်တွေ့ အသုံးချရတာ အရမ်းလွယ်သွားပါလိမ့်မယ်။ အခြေခံကနေ စရှင်းပြရမလား၊ ဒါမှမဟုတ် သင်သိထားပြီးသား အပိုင်းကနေ ဆက်သွားကြမလား?"
-            }
-
-            else -> {
-                val followUp = if (lastUserTopic != null) {
-                    "ခုနက \"$lastUserTopic\" နဲ့ရော ဆက်စပ်နေသေးလား၊ ဒါမှမဟုတ် အသစ်တစ်ခု စဉ်းစားနေတာလား ပြောပြပါဦးနော်။"
-                } else {
-                    "အဲဒီအပေါ် သင့်ရဲ့ အမြင်ကရော ဘယ်လိုရှိလဲ၊ ပွင့်ပွင့်လင်းလင်း ဆက်ဆွေးနွေးကြည့်ကြမလား?"
-                }
-                "သင်ပြောတဲ့ \"$prompt\" အကြောင်းကို သေချာစဉ်းစားကြည့်မိတယ်။ လက်တွေ့ကျကျ ကြည့်မယ်ဆိုရင် အားသာချက်ရော သတိထားရမယ့် အချက်လေးတွေပါ ရှိနေတာမို့ အသေးစိတ် တိုင်ပင်ကြည့်ရအောင်။ $followUp"
-            }
-        }
-
-        return Pair(responseText, thoughtChain)
     }
 }
