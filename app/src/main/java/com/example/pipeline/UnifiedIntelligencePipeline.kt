@@ -681,15 +681,32 @@ class UnifiedIntelligencePipeline(
                 }
                 "VOLUME_UP", "VOLUME_DOWN", "SET_VOLUME", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN" -> {
                     val cmdResult = actionExecutor.executeSystemAction(rawText)
-                    UnifiedActionResult(
-                        success = cmdResult?.isSuccess ?: true,
-                        verified = cmdResult?.isSuccess ?: true,
-                        actionType = actionType,
-                        target = target,
-                        parameters = parameters,
-                        reason = cmdResult?.userMessage ?: "Volume changed",
-                        executionTimeMs = System.currentTimeMillis() - startTime
-                    )
+                    if (cmdResult == null) {
+                        // ISSUE-030 (same fabrication class): executeSystemAction
+                        // returns null when the system-action handler cannot parse
+                        // the command, i.e. NOTHING was executed. Never default
+                        // that to success/verified.
+                        UnifiedActionResult(
+                            success = false,
+                            verified = false,
+                            actionType = actionType,
+                            target = target,
+                            parameters = parameters,
+                            reason = "စနစ်အမိန့်ကို လုပ်ဆောင်နိုင်ခြင်း မရှိပါခင်ဗျာ",
+                            errorCode = "UNSUPPORTED",
+                            executionTimeMs = System.currentTimeMillis() - startTime
+                        )
+                    } else {
+                        UnifiedActionResult(
+                            success = cmdResult.isSuccess,
+                            verified = cmdResult.isSuccess,
+                            actionType = actionType,
+                            target = target,
+                            parameters = parameters,
+                            reason = cmdResult.userMessage,
+                            executionTimeMs = System.currentTimeMillis() - startTime
+                        )
+                    }
                 }
                 "FLASHLIGHT" -> {
                     val enable = parameters["enable"] as? Boolean ?: true
@@ -887,13 +904,20 @@ class UnifiedIntelligencePipeline(
                     )
                 }
                 else -> {
+                    // ISSUE-030: this fallback covers every action type with no
+                    // executor branch — unmapped "CUSTOM" intents, "DELETE"
+                    // (no implementation exists), and mapped-but-unimplemented
+                    // types (SET_ALARM, SET_TIMER, NEXT_TRACK, PAUSE_MEDIA, ...).
+                    // Nothing is executed here, so the only honest result is an
+                    // unsupported failure — never success, never verified.
                     UnifiedActionResult(
-                        success = true,
-                        verified = true,
+                        success = false,
+                        verified = false,
                         actionType = actionType,
                         target = target,
                         parameters = parameters,
-                        reason = "Generic action completed",
+                        reason = "ဒီလုပ်ဆောင်ချက်ကို မပံ့ပိုးသေးပါခင်ဗျာ",
+                        errorCode = "UNSUPPORTED",
                         executionTimeMs = System.currentTimeMillis() - startTime
                     )
                 }
