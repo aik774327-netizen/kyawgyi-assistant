@@ -401,6 +401,21 @@ class KyawGyiAccessibilityService : AccessibilityService() {
                 "Wake Word 'ကျော်ကြီး' Recognized! Listening for command..."
             }
 
+            // FIX-04: hardware toggles delegate to the shared action
+            // executor; its (now honest) userMessage is the result —
+            // a panel-only outcome reads as panel-only here too.
+            MyanmarCommandType.WIFI_TOGGLE -> {
+                com.example.actions.KyawGyiActionExecutor(this).setWifi(payload == "ON").userMessage
+            }
+
+            MyanmarCommandType.BLUETOOTH_TOGGLE -> {
+                com.example.actions.KyawGyiActionExecutor(this).setBluetooth(payload == "ON").userMessage
+            }
+
+            MyanmarCommandType.FLASHLIGHT_TOGGLE -> {
+                com.example.actions.KyawGyiActionExecutor(this).setFlashlight(payload == "ON").userMessage
+            }
+
             else -> {
                 "Command received: $spokenText"
             }

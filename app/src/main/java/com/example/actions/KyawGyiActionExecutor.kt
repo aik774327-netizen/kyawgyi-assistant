@@ -17,6 +17,16 @@ import com.example.security.RiskPolicy
 import kotlinx.coroutines.runBlocking
 import java.net.URLEncoder
 
+/**
+ * FIX-04: returns the first camera id whose flash unit is present,
+ * or null when none is. Pure (the capability probe is injected) so
+ * the selection policy is unit-testable without camera hardware.
+ */
+fun firstFlashCapableCameraId(
+    cameraIds: List<String>,
+    hasFlashUnit: (String) -> Boolean
+): String? = cameraIds.firstOrNull { id -> runCatching { hasFlashUnit(id) }.getOrDefault(false) }
+
 data class CommandResult(
     val isSuccess: Boolean,
     val action: String,
@@ -117,8 +127,8 @@ open class KyawGyiActionExecutor(val context: Context) {
 
         return try {
             val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
-            val cameraId = cameraManager?.cameraIdList?.firstOrNull()
-            if (cameraId == null) {
+            val cameraIds = cameraManager?.cameraIdList?.toList().orEmpty()
+            if (cameraManager == null || cameraIds.isEmpty()) {
                 FailureMemoryEngine.recordFailure(
                     component = "FLASHLIGHT_ACTION",
                     operation = opName,
@@ -136,6 +146,42 @@ open class KyawGyiActionExecutor(val context: Context) {
                     executionStarted = false,
                     executionConfirmed = false,
                     errorCode = "CAMERA_SERVICE_UNAVAILABLE",
+                    userMessage = finalMsg,
+                    failurePreWarning = preWarning
+                )
+            }
+
+            // FIX-04: choose a camera that actually HAS a flash unit.
+            // The pre-fix code used cameraIdList.firstOrNull(), which
+            // on multi-camera devices can select a flash-less camera
+            // and fail (or silently target the wrong hardware). If no
+            // camera reports FLASH_INFO_AVAILABLE, fail honestly.
+            val cameraId = firstFlashCapableCameraId(cameraIds) { id ->
+                try {
+                    cameraManager.getCameraCharacteristics(id)
+                        .get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            if (cameraId == null) {
+                FailureMemoryEngine.recordFailure(
+                    component = "FLASHLIGHT_ACTION",
+                    operation = opName,
+                    category = FailureCategory.RESOURCE,
+                    rootCauseMm = "Flash ပါသော Camera မရှိပါ",
+                    technicalDetails = "No camera reports FLASH_INFO_AVAILABLE among $cameraIds",
+                    suggestedRemediationMm = "မျက်နှာပြင် အလင်းရောင် အမြင့်ဆုံးတင်၍ အလင်းရယူပါ"
+                )
+                val baseMsg = "ဤဖုန်းတွင် Flash ပါသော Camera မရှိပါသဖြင့် ဓာတ်မီး မဖွင့်နိုင်ပါခင်ဗျာ။"
+                val finalMsg = if (preWarning != null) "$preWarning\n\n$baseMsg" else baseMsg
+                return CommandResult(
+                    isSuccess = false,
+                    action = if (enable) "TURN_ON_FLASH" else "TURN_OFF_FLASH",
+                    target = "FLASHLIGHT",
+                    executionStarted = false,
+                    executionConfirmed = false,
+                    errorCode = "NO_FLASH_CAMERA",
                     userMessage = finalMsg,
                     failurePreWarning = preWarning
                 )
@@ -259,14 +305,22 @@ open class KyawGyiActionExecutor(val context: Context) {
                     context.startActivity(fallbackIntent)
                 }
 
+                // FIX-04 honesty contract: opening the panel (and even
+                // queueing the accessibility click automation) is NOT a
+                // Wi-Fi state change. The pre-fix result claimed
+                // isSuccess=true / executionConfirmed=true here — an
+                // ISSUE-030-class false success. Panel-only outcomes
+                // now report isSuccess=false / executionConfirmed=false
+                // with errorCode PANEL_ONLY_NO_DIRECT_TOGGLE, and the
+                // message says plainly that the state has not changed.
                 val baseMsg = if (accessibilityActive) {
-                    "Android 10+ လုံခြုံရေးကြောင့် Wi-Fi Panel ဖွင့်၍ Accessibility စနစ်ဖြင့် အလိုအလျောက် ${if (enable) "ဖွင့်" else "ပိတ်"}ပေးနေပါသည်ခင်ဗျာ။"
+                    "Wi-Fi Panel ဖွင့်၍ Accessibility စနစ်ဖြင့် ခလုတ် နှိပ်ခိုင်းထားပါသည်ခင်ဗျာ။ သို့သော် Wi-Fi state ပြောင်းလဲမှု အတည်ပြုချက် မရသေးပါခင်ဗျာ — Panel ပေါ်တွင် စစ်ဆေးပေးပါ။"
                 } else {
-                    "Android 10+ လုံခြုံရေး စည်းမျဉ်းအရ Wi-Fi ကို တိုက်ရိုက်ပိတ်/ဖွင့်ခွင့် မရှိသဖြင့် Wi-Fi ဆက်တင် Panel ကို ဖွင့်ပေးထားပါသည်ခင်ဗျာ။"
+                    "Android 10+ လုံခြုံရေး စည်းမျဉ်းအရ Wi-Fi ကို တိုက်ရိုက် ဖွင့်/ပိတ်ခွင့် မရှိသဖြင့် Wi-Fi Panel ကို ဖွင့်ပေးထားပါသည်ခင်ဗျာ။ Wi-Fi state မပြောင်းသေးပါ — Panel ထဲက ခလုတ်ကို ကိုယ်တိုင် နှိပ်ပေးပါခင်ဗျာ။"
                 }
                 val finalMsg = if (preWarning != null) "$preWarning\n\n$baseMsg" else baseMsg
                 CommandResult(
-                    isSuccess = true,
+                    isSuccess = false,
                     action = if (accessibilityActive) "AUTO_TOGGLE_WIFI_PANEL" else "OPEN_WIFI_PANEL",
                     target = "WIFI_SETTINGS",
                     parameters = mapOf(
@@ -274,7 +328,8 @@ open class KyawGyiActionExecutor(val context: Context) {
                         "targetEnable" to enable.toString()
                     ),
                     executionStarted = true,
-                    executionConfirmed = true,
+                    executionConfirmed = false,
+                    errorCode = "PANEL_ONLY_NO_DIRECT_TOGGLE",
                     userMessage = finalMsg,
                     failurePreWarning = preWarning
                 )
@@ -361,14 +416,20 @@ open class KyawGyiActionExecutor(val context: Context) {
             }
             context.startActivity(settingsIntent)
 
+            // FIX-04 honesty contract (same as setWifi): opening the
+            // Bluetooth Settings page is NOT a Bluetooth state change.
+            // The pre-fix result claimed isSuccess=true /
+            // executionConfirmed=true; direct toggle is forbidden to
+            // third-party apps (restrictions tightened further in
+            // API 33+), so the honest outcome is panel-only.
             val baseMsg = if (accessibilityActive) {
-                "Android လုံခြုံရေးကြောင့် Bluetooth ဆက်တင်ဖွင့်၍ Accessibility စနစ်ဖြင့် အလိုအလျောက် ${if (enable) "ဖွင့်" else "ပိတ်"}ပေးနေပါသည်ခင်ဗျာ။"
+                "Bluetooth ဆက်တင် ဖွင့်၍ Accessibility စနစ်ဖြင့် ခလုတ် နှိပ်ခိုင်းထားပါသည်ခင်ဗျာ။ သို့သော် Bluetooth state ပြောင်းလဲမှု အတည်ပြုချက် မရသေးပါခင်ဗျာ — ဆက်တင် Page ပေါ်တွင် စစ်ဆေးပေးပါ။"
             } else {
-                "Android လုံခြုံရေး စည်းမျဉ်းအရ Bluetooth ကို တိုက်ရိုက်ပိတ်/ဖွင့်ခွင့် မရှိသဖြင့် Bluetooth ဆက်တင်ကို ဖွင့်ပေးထားပါသည်ခင်ဗျာ။"
+                "Android လုံခြုံရေး စည်းမျဉ်းအရ Bluetooth ကို တိုက်ရိုက် ဖွင့်/ပိတ်ခွင့် မရှိသဖြင့် Bluetooth ဆက်တင် Page ကို ဖွင့်ပေးထားပါသည်ခင်ဗျာ။ Bluetooth state မပြောင်းသေးပါ — Page ထဲက ခလုတ်ကို ကိုယ်တိုင် နှိပ်ပေးပါခင်ဗျာ။"
             }
             val finalMsg = if (preWarning != null) "$preWarning\n\n$baseMsg" else baseMsg
             CommandResult(
-                isSuccess = true,
+                isSuccess = false,
                 action = if (accessibilityActive) "AUTO_TOGGLE_BLUETOOTH" else "OPEN_BLUETOOTH_SETTINGS",
                 target = "BLUETOOTH_SETTINGS",
                 parameters = mapOf(
@@ -376,7 +437,8 @@ open class KyawGyiActionExecutor(val context: Context) {
                     "targetEnable" to enable.toString()
                 ),
                 executionStarted = true,
-                executionConfirmed = true,
+                executionConfirmed = false,
+                errorCode = "PANEL_ONLY_NO_DIRECT_TOGGLE",
                 userMessage = finalMsg,
                 failurePreWarning = preWarning
             )

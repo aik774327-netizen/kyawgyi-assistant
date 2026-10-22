@@ -11,6 +11,8 @@ enum class CommandIntent {
     TURN_OFF_FLASH,
     TURN_ON_WIFI,
     TURN_OFF_WIFI,
+    TURN_ON_BLUETOOTH,
+    TURN_OFF_BLUETOOTH,
     OPEN_FACEBOOK,
     OPEN_YOUTUBE,
     OPEN_TELEGRAM,
@@ -172,6 +174,20 @@ class KyawGyiIntentRouter {
         if (text.contains("ဝိုင်ဖိုင်ပိတ်") || text.contains("wifiပိတ်") || text.contains("wifi ပိတ်")) {
             return ParsedCommand(CommandIntent.TURN_OFF_WIFI, rawText)
         }
+        // FIX-04: Bluetooth intents were missing entirely — "ဘလူးတူးသ်
+        // ဖွင့်" parsed to UNKNOWN on this path, so nothing happened
+        // on the user's phone (device evidence B3). Both spaced and
+        // unspaced forms are matched, like Wi-Fi above.
+        if (text.contains("ဘလူးတူးသ်ဖွင့်") || text.contains("bluetoothဖွင့်") || text.contains("bluetooth ဖွင့်") ||
+            (text.contains("ဘလူးတူးသ်") && text.contains("ဖွင့်")) || (text.contains("bluetooth", ignoreCase = true) && text.contains("ဖွင့်"))
+        ) {
+            return ParsedCommand(CommandIntent.TURN_ON_BLUETOOTH, rawText)
+        }
+        if (text.contains("ဘလူးတူးသ်ပိတ်") || text.contains("bluetoothပိတ်") || text.contains("bluetooth ပိတ်") ||
+            (text.contains("ဘလူးတူးသ်") && text.contains("ပိတ်")) || (text.contains("bluetooth", ignoreCase = true) && text.contains("ပိတ်"))
+        ) {
+            return ParsedCommand(CommandIntent.TURN_OFF_BLUETOOTH, rawText)
+        }
 
         // -----------------------------------------------------------------
         // 3B. SMS & MESSAGES (မက်ဆေ့ခ်ျ / စာပို့)
@@ -316,6 +332,8 @@ class KyawGyiIntentRouter {
             CommandIntent.TURN_OFF_FLASH -> executor.setFlashlight(false)
             CommandIntent.TURN_ON_WIFI -> executor.setWifi(true)
             CommandIntent.TURN_OFF_WIFI -> executor.setWifi(false)
+            CommandIntent.TURN_ON_BLUETOOTH -> executor.setBluetooth(true)
+            CommandIntent.TURN_OFF_BLUETOOTH -> executor.setBluetooth(false)
             CommandIntent.OPEN_FACEBOOK -> {
                 contextManager.updateAppTarget("com.facebook.katana", "Facebook")
                 executor.openApplication(parsed.slot!!, "Facebook")

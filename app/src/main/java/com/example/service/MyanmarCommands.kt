@@ -12,6 +12,7 @@ enum class MyanmarCommandType {
     SHOW_GRID, SHOW_LABELS, COPY, PASTE, DELETE, SEARCH,
     VOLUME_UP, VOLUME_DOWN,
     PLAY_MUSIC, PAUSE_MUSIC, STOP_MUSIC, CALL_CONTACT,
+    WIFI_TOGGLE, BLUETOOTH_TOGGLE, FLASHLIGHT_TOGGLE,
     READ_SCREEN,
     SELECT_TEXT, CUSTOM, CUSTOM_SHORTCUT, WAKE_WORD, UNKNOWN
 }
@@ -34,6 +35,8 @@ data class ParsedCommand(
     val isStop: Boolean = false,
     /** ISSUE-013: true when the input is a prohibitive negation ("မပိတ်ပါနဲ့") — never an executable command. */
     val isNegated: Boolean = false,
+    /** FIX-04: for the *_TOGGLE command types — true = switch ON, false = OFF. */
+    val isEnable: Boolean = true,
     val raw: String = ""
 )
 
@@ -178,6 +181,30 @@ object MyanmarCommands {
      * - Wake word မပါဘဲ command word ပဲပါရင်လည်း အသိအမှတ်ပြုသည် (VoiceForegroundService က
      *   ACTIVE state ထဲမှာ ရှိမှသာ ဒီလို command ကို အလုပ်လုပ်ခွင့်ပြုမည်)
      */
+    /**
+     * FIX-04: hardware toggle detection for the bubble parser.
+     * Returns (command type, enable) or null. Callers must run the
+     * ISSUE-013 negation veto first (parse() does), so a ဖွင့်/ပိတ်
+     * seen here is affirmative.
+     */
+    private fun detectHardwareToggle(text: String): Pair<MyanmarCommandType, Boolean>? {
+        val enable = when {
+            text.contains("ဖွင့်") -> true
+            text.contains("ပိတ်") -> false
+            else -> return null
+        }
+        return when {
+            text.contains("ဝိုင်ဖိုင်") || text.contains("ဝိုင်ဖိုင်") ||
+                text.contains("wifi", ignoreCase = true) ->
+                MyanmarCommandType.WIFI_TOGGLE to enable
+            text.contains("ဘလူးတူးသ်") || text.contains("bluetooth", ignoreCase = true) ->
+                MyanmarCommandType.BLUETOOTH_TOGGLE to enable
+            text.contains("ဓာတ်မီး") ->
+                MyanmarCommandType.FLASHLIGHT_TOGGLE to enable
+            else -> null
+        }
+    }
+
     fun parse(text: String): ParsedCommand? {
         val stripped = text.trim()
         if (stripped.isEmpty()) return null
@@ -267,6 +294,21 @@ object MyanmarCommands {
             )
         }
 
+        // FIX-04: hardware toggles — placed after the READ_SCREEN and
+        // negation handling above and before the generic pattern loop,
+        // which has no toggle entries. Without this, toggle phrases
+        // resolved to UNKNOWN and nothing happened (evidence B3).
+        val hardwareToggle = detectHardwareToggle(remainder)
+        if (hardwareToggle != null) {
+            return ParsedCommand(
+                type = hardwareToggle.first,
+                appId = null,
+                isWake = hasWake,
+                isEnable = hardwareToggle.second,
+                raw = remainder
+            )
+        }
+
         if (STOP_WORDS.any { stripped.contains(it) } && appId == null) {
             return ParsedCommand(isStop = true, raw = stripped)
         }
@@ -322,6 +364,13 @@ object MyanmarCommands {
                 val appKey = parsed.appId ?: ""
                 val targetQuery = APP_NAME_MAPPINGS[appKey] ?: appKey
                 return Pair(MyanmarCommandType.OPEN_APP, targetQuery)
+            }
+            if (parsed.type == MyanmarCommandType.WIFI_TOGGLE ||
+                parsed.type == MyanmarCommandType.BLUETOOTH_TOGGLE ||
+                parsed.type == MyanmarCommandType.FLASHLIGHT_TOGGLE
+            ) {
+                // FIX-04: the legacy Pair carries ON/OFF in its payload.
+                return Pair(parsed.type, if (parsed.isEnable) "ON" else "OFF")
             }
             if (parsed.type != null) {
                 val payload = parsed.direction?.name ?: parsed.appId ?: parsed.raw
