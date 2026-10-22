@@ -507,14 +507,21 @@ class ApiKeyQuotaManager private constructor(private val context: Context) {
     // Public Management API for Settings UI & Testing
     // =========================================================================
 
+    /**
+     * FIX-05: returns whether the key was actually PERSISTED to the
+     * secure vault. The pre-fix Unit return let the Settings UI show
+     * an unconditional success Toast even when the vault write failed
+     * and the key existed only in memory (lost on restart). Callers
+     * must surface this result honestly.
+     */
     suspend fun addOrUpdateKey(
         rawKey: String,
         label: String,
         tier: ApiKeyTier = ApiKeyTier.CUSTOM,
         dailyLimit: Int = 1500
-    ) = mutex.withLock {
+    ): Boolean = mutex.withLock {
         val cleanKey = rawKey.trim()
-        if (cleanKey.isBlank()) return@withLock
+        if (cleanKey.isBlank()) return@withLock false
 
         val existingId = keysMap.entries.firstOrNull { it.value.rawKey == cleanKey }?.key
         // UUID, not currentTimeMillis: two keys added within the same
@@ -538,6 +545,7 @@ class ApiKeyQuotaManager private constructor(private val context: Context) {
             recordAlert(label, "API key was NOT saved: secure storage unavailable. The key is only in memory for this session.", AlertSeverity.CRITICAL)
         }
         updateOverviewState()
+        saved
     }
 
     suspend fun removeKey(keyId: String) = mutex.withLock {

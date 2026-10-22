@@ -463,9 +463,22 @@ fun ApiKeyManagementCard(
             onDismiss = { showAddKeyDialog = false },
             onKeyAdded = { key, label, tier ->
                 coroutineScope.launch {
-                    quotaManager.addOrUpdateKey(rawKey = key, label = label, tier = tier)
+                    // FIX-05: the success Toast fires ONLY when the
+                    // vault write actually persisted. The pre-fix code
+                    // toasted "ထည့်သွင်းပြီးပါပြီ ✓" unconditionally —
+                    // even when the save had failed and the key lived
+                    // only in memory until the app restarted.
+                    val saved = quotaManager.addOrUpdateKey(rawKey = key, label = label, tier = tier)
                     showAddKeyDialog = false
-                    Toast.makeText(context, "Key အသစ်အား Secure Vault တွင် ထည့်သွင်းပြီးပါပြီ ✓", Toast.LENGTH_SHORT).show()
+                    if (saved) {
+                        Toast.makeText(context, "Key အသစ်အား Secure Vault တွင် ထည့်သွင်းပြီးပါပြီ ✓", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Key သိမ်း၍ မရပါ — Secure Vault သို့ ရေးသားမှု မအောင်မြင်ပါ။ Key သည် ယခုအစီအစဉ်အတွက်သာ မှတ်ဉာဏ်ထဲတွင် ရှိပါမည်",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
         )

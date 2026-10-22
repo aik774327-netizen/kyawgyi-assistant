@@ -32,7 +32,19 @@ class NoApiKeyConfiguredException(
 ) : IOException(message, cause)
 
 
-class GeminiApiService(private val context: Context? = null) {
+/** FIX-05: the default production HTTP client (unchanged timeouts). */
+private fun defaultGeminiHttpClient(): OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(30, TimeUnit.SECONDS)
+    .readTimeout(30, TimeUnit.SECONDS)
+    .build()
+
+class GeminiApiService(
+    private val context: Context? = null,
+    // FIX-05: injectable HTTP seam so request/HTTP-status behavior is
+    // unit-testable with a fake transport. Production call sites use
+    // the default client with the same timeouts as before.
+    private val httpClient: OkHttpClient = defaultGeminiHttpClient()
+) {
 
     companion object {
         private const val TAG = "GeminiApiService"
@@ -62,10 +74,8 @@ class GeminiApiService(private val context: Context? = null) {
         }
     }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    // (The HTTP client is constructor-injected — see httpClient and
+    // the file-level defaultGeminiHttpClient() below.)
 
     suspend fun generateResponse(
         prompt: String,
@@ -108,6 +118,22 @@ class GeminiApiService(private val context: Context? = null) {
                         "Error 429: RESOURCE_EXHAUSTED - Gemini API Quota ပြည့်သွားပါပြီ"
                     )
                 }
+                // FIX-05: classified failures (auth rejection, HTTP
+                // server/endpoint errors, timeout, unreachable) get
+                // their own honest message — never the generic
+                // connection line, which falsely implied a network
+                // problem for e.g. an HTTP 403 auth rejection.
+                val failureClass = GeminiFailureClassifier.classify(e)
+                if (failureClass != GeminiFailureClass.UNKNOWN) {
+                    Log.w(TAG, "Gemini request failed (class=$failureClass): ${e.javaClass.simpleName}")
+                    return@withContext Pair(
+                        GeminiFailureClassifier.userMessageFor(
+                            failureClass,
+                            (e as? GeminiHttpException)?.code
+                        ),
+                        "Error: GEMINI_${failureClass.name} - ${e.javaClass.simpleName}"
+                    )
+                }
                 // Honest failure: never substitute canned local replies for a
                 // real Gemini response (FAKE-06, removed 2026-10-22).
                 Log.w(TAG, "Gemini request failed: ${e.message}")
@@ -144,6 +170,18 @@ class GeminiApiService(private val context: Context? = null) {
                 return@withContext Pair(
                     GEMINI_QUOTA_ERROR_MESSAGE,
                     "Error 429: RESOURCE_EXHAUSTED - Gemini API Quota ပြည့်သွားပါပြီ"
+                )
+            }
+            // FIX-05: same classification as the manager path above.
+            val failureClass = GeminiFailureClassifier.classify(e)
+            if (failureClass != GeminiFailureClass.UNKNOWN) {
+                Log.w(TAG, "Direct Gemini call failed (class=$failureClass): ${e.javaClass.simpleName}")
+                return@withContext Pair(
+                    GeminiFailureClassifier.userMessageFor(
+                        failureClass,
+                        (e as? GeminiHttpException)?.code
+                    ),
+                    "Error: GEMINI_${failureClass.name} - ${e.javaClass.simpleName}"
                 )
             }
             Log.e(TAG, "Direct Gemini call failed: ${e.message}")
@@ -220,7 +258,7 @@ class GeminiApiService(private val context: Context? = null) {
             .post(requestJson.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = client.newCall(httpRequest).execute()
+        val response = httpClient.newCall(httpRequest).execute()
         val responseCode = response.code
         val responseString = response.body?.string() ?: ""
 
@@ -231,8 +269,12 @@ class GeminiApiService(private val context: Context? = null) {
         }
 
         if (!response.isSuccessful) {
-            Log.w(TAG, "Gemini API call unsuccessful ($responseCode): $responseString")
-            throw IOException("HTTP $responseCode Error: $responseString")
+            // FIX-05: carry ONLY the status code (never the key, never
+            // the URL) so generateResponse can classify the failure —
+            // the pre-fix generic IOException collapsed auth rejections
+            // and server errors into one "connection problem" message.
+            Log.w(TAG, "Gemini API call unsuccessful (HTTP $responseCode)")
+            throw GeminiHttpException(responseCode)
         }
 
         if (responseString.isNotBlank()) {
@@ -284,7 +326,7 @@ class GeminiApiService(private val context: Context? = null) {
                 .post(rootObj.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val response = client.newCall(request).execute()
+            val response = httpClient.newCall(request).execute()
             val code = response.code
             val body = response.body?.string() ?: ""
 
@@ -295,10 +337,19 @@ class GeminiApiService(private val context: Context? = null) {
             if (response.isSuccessful) {
                 Pair(true, "Key is active and responsive ✓")
             } else {
-                Pair(false, "HTTP $code: Invalid key or access denied")
+                // FIX-05: the true outcome class per status — the
+                // pre-fix code labeled EVERY non-429 failure
+                // (including HTTP 500 and 404) "Invalid key or access
+                // denied", sending the user to fix a key that was
+                // never the problem.
+                val failureClass = GeminiFailureClassifier.classifyHttpCode(code)
+                Pair(false, GeminiFailureClassifier.userMessageFor(failureClass, code))
             }
         } catch (e: Exception) {
-            Pair(false, "Network error: ${e.message}")
+            // FIX-05: timeouts vs unreachable vs other network errors
+            // are distinct outcomes, not one "Network error" line.
+            val failureClass = GeminiFailureClassifier.classify(e)
+            Pair(false, GeminiFailureClassifier.userMessageFor(failureClass))
         }
     }
 }
