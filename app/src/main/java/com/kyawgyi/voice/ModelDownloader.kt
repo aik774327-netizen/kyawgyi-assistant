@@ -25,7 +25,6 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
-import java.util.zip.ZipOutputStream
 
 /**
  * Observable state for a model installation operation.
@@ -219,6 +218,7 @@ class ModelDownloader(
         try {
             Log.i(TAG, "Connecting to model download source: $sourceUrl")
             var downloadedFromRemote = false
+            var remoteFailureReason: String? = null
 
             try {
                 val url = URL(sourceUrl)
@@ -261,22 +261,31 @@ class ModelDownloader(
                     }
                     downloadedFromRemote = tempZipFile.exists() && tempZipFile.length() > 0L
                 } else {
+                    remoteFailureReason = "HTTP $responseCode"
                     Log.i(
                         TAG,
-                        "Remote model mirror returned HTTP $responseCode; activating built-in offline Myanmar model bundle fallback."
+                        "Remote model mirror returned HTTP $responseCode; download failed (no bundled fallback model exists)."
                     )
                 }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (netEx: Exception) {
+                remoteFailureReason = netEx.message ?: netEx.javaClass.simpleName
                 Log.i(
                     TAG,
-                    "Remote model mirror unreachable (${netEx.message}); activating built-in offline Myanmar model bundle fallback."
+                    "Remote model mirror unreachable (${netEx.message}); download failed (no bundled fallback model exists)."
                 )
             }
 
             if (!downloadedFromRemote) {
-                provisionBundledOfflineModelZip(tempZipFile)
+                // ISSUE-017: report the failure honestly. There is no bundled
+                // offline model in this build, and a model archive must never
+                // be fabricated locally to disguise a failed download.
+                val reason = remoteFailureReason ?: "unknown error"
+                val failMsg = "မော်ဒယ် ရယူရာတွင် အမှားဖြစ်ပေါ်ပါသည်: $reason"
+                Log.w(TAG, "Model download failed: $reason")
+                _downloadState.value = DownloadState.Failed(failMsg)
+                return false
             }
 
             Log.i(TAG, "Model archive ready. Extracting archive to ${targetDir.absolutePath}...")
@@ -308,84 +317,6 @@ class ModelDownloader(
                 tempZipFile.delete()
             }
         }
-    }
-
-    /**
-     * Generates a verified, self-contained offline Myanmar acoustic & linguistic model archive
-     * (Sherpa-ONNX Zipformer + Vosk Small Myanmar) when external GitHub mirrors return 404 or are offline.
-     */
-    private fun provisionBundledOfflineModelZip(destZipFile: File) {
-        val totalSimulatedBytes = 65_536L
-        _downloadState.value = DownloadState.Downloading(25, 16_384L, totalSimulatedBytes)
-
-        ZipOutputStream(FileOutputStream(destZipFile)).use { zos ->
-            // 1. Primary Sherpa-ONNX Burmese Acoustic Model binary header & metadata
-            zos.putNextEntry(ZipEntry("sherpa-onnx-burmese.onnx"))
-            val onnxHeaderAndPayload = buildString {
-                append("ONNX_MYANMAR_ZIPFORMER_V2024_INT8\n")
-                append("sample_rate=16000\n")
-                append("feature_dim=80\n")
-                append("lang=my-MM\n")
-                repeat(128) { idx ->
-                    append("acoustic_frame_block_$idx:ကခဂဃငစဆဇဈညတထဒဓနပဖဗဘမယရလဝသဟဠအ\n")
-                }
-            }.toByteArray(Charsets.UTF_8)
-            zos.write(onnxHeaderAndPayload)
-            zos.closeEntry()
-
-            _downloadState.value = DownloadState.Downloading(60, 39_321L, totalSimulatedBytes)
-
-            // 2. Sherpa-ONNX Burmese Phoneme & Syllable Tokens
-            val tokensBytes = buildString {
-                append("<blk> 0\n<sos/eos> 1\n<unk> 2\n")
-                val syllables = listOf(
-                    "ကျော်", "ကြီး", "ဟယ်", "လို", "ဖုန်း", "ခေါ်", "ပေး", "ပါ",
-                    "ဝိုင်", "ဖိုင်", "ဘလူး", "တုသ်", "ဓာတ်", "မီး", "ဖွင့်", "ပိတ်",
-                    "သုည", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"
-                )
-                syllables.forEachIndexed { index, syl ->
-                    append("$syl ${index + 3}\n")
-                }
-            }.toByteArray(Charsets.UTF_8)
-
-            zos.putNextEntry(ZipEntry("tokens.txt"))
-            zos.write(tokensBytes)
-            zos.closeEntry()
-
-            // 2b. Standard Sherpa-ONNX myanmar/ transducer layout (encoder.onnx, decoder.onnx, joiner.onnx, tokens.txt)
-            zos.putNextEntry(ZipEntry("myanmar/"))
-            zos.closeEntry()
-            for (subName in listOf("encoder.onnx", "decoder.onnx", "joiner.onnx")) {
-                zos.putNextEntry(ZipEntry("myanmar/$subName"))
-                zos.write(onnxHeaderAndPayload)
-                zos.closeEntry()
-            }
-            zos.putNextEntry(ZipEntry("myanmar/tokens.txt"))
-            zos.write(tokensBytes)
-            zos.closeEntry()
-
-            _downloadState.value = DownloadState.Downloading(85, 55_705L, totalSimulatedBytes)
-
-            // 3. Secondary Vosk Small Myanmar Model directory & configuration
-            zos.putNextEntry(ZipEntry("vosk-model-my/"))
-            zos.closeEntry()
-
-            zos.putNextEntry(ZipEntry("vosk-model-my/conf/"))
-            zos.closeEntry()
-
-            zos.putNextEntry(ZipEntry("vosk-model-my/conf/model.conf"))
-            val voskConf = "--sample-frequency=16000\n--frame-length=25\n--low-freq=20\n--high-freq=-400\n"
-                .toByteArray(Charsets.UTF_8)
-            zos.write(voskConf)
-            zos.closeEntry()
-
-            zos.putNextEntry(ZipEntry("vosk-model-my/am/final.mdl"))
-            val voskMdl = "KALDI_VOSK_MYANMAR_SMALL_0_4_ACOUSTIC_MODEL_VERIFIED".toByteArray(Charsets.UTF_8)
-            zos.write(voskMdl)
-            zos.closeEntry()
-        }
-
-        _downloadState.value = DownloadState.Downloading(100, totalSimulatedBytes, totalSimulatedBytes)
     }
 
     /**
