@@ -94,7 +94,10 @@ data class UnifiedActionResult(
     val errorCode: String? = null,
     val outputData: Map<String, Any?> = emptyMap(),
     val executionTimeMs: Long = 0L,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    // ISSUE-037: propagated from the executor's CommandResult — the ER entry
+    // already minted for this failure event, if any.
+    val errorLearningEntryId: String? = null
 )
 
 /**

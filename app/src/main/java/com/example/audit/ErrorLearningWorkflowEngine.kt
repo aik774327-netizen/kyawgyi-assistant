@@ -663,6 +663,58 @@ object ErrorLearningWorkflowEngine {
     }
 
     /**
+     * ISSUE-037 — records a pipeline-layer failure WITHOUT minting a
+     * duplicate ER entry when the executor already recorded this exact
+     * failure event. When [executorEntryId] names an existing entry, that
+     * entry is returned with a PIPELINE_CROSS_REF history note (the Room
+     * CommandFailureAnalyzer row is recorded separately by the caller and
+     * cross-references the same id). Otherwise this behaves exactly like
+     * [recordErrorLog].
+     */
+    @Synchronized
+    fun recordFailureOnce(
+        executorEntryId: String?,
+        task: String,
+        commandKey: String,
+        expectedResult: String,
+        actualResult: String,
+        attemptedMethod: String,
+        evidence: String,
+        recoveryAttempt: String,
+        recoveryResult: String
+    ): ErrorLogEntry {
+        if (executorEntryId != null) {
+            val idx = errorLogHistory.indexOfLast { it.errorId == executorEntryId }
+            if (idx >= 0) {
+                val existing = errorLogHistory[idx]
+                val updated = existing.copy(
+                    lastSeenMs = System.currentTimeMillis(),
+                    statusTransitionHistory = existing.statusTransitionHistory +
+                        "PIPELINE_CROSS_REF (same failure event $executorEntryId; duplicate ER entry suppressed)"
+                )
+                errorLogHistory[idx] = updated
+                if (failedMethodMemory[updated.commandKey]?.errorId == executorEntryId) {
+                    failedMethodMemory[updated.commandKey] = updated
+                }
+                saveToPersistentStorage()
+                publishStateFlows()
+                Log.i(TAG, "ISSUE-037: pipeline failure cross-referenced to existing $executorEntryId; no duplicate ER entry minted.")
+                return updated
+            }
+        }
+        return recordErrorLog(
+            task = task,
+            commandKey = commandKey,
+            expectedResult = expectedResult,
+            actualResult = actualResult,
+            attemptedMethod = attemptedMethod,
+            evidence = evidence,
+            recoveryAttempt = recoveryAttempt,
+            recoveryResult = recoveryResult
+        )
+    }
+
+    /**
      * Checks if a requested command/method has previously failed.
      * Automatically runs Live Condition Verifier when Context is available.
      * When conditions resolve, transitions historical entry through:

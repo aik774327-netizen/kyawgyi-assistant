@@ -36,7 +36,10 @@ data class CommandResult(
     val executionConfirmed: Boolean = false,
     val errorCode: String? = null,
     val userMessage: String,
-    val failurePreWarning: String? = null
+    val failurePreWarning: String? = null,
+    // ISSUE-037: ER entry id when this failure was already recorded via
+    // FailureMemoryEngine — lets the pipeline skip its duplicate ER mint.
+    val errorLearningEntryId: String? = null
 )
 
 open class KyawGyiActionExecutor(val context: Context) {
@@ -554,15 +557,18 @@ open class KyawGyiActionExecutor(val context: Context) {
                 details = "package=$targetPkg error=${launchResult.error}"
             )
 
+            // ISSUE-037: capture the failure-event id (ER entry id) so the
+            // pipeline does not mint a second ER entry for this same failure.
+            var launchFailureEntryId: String? = null
             if (!launchResult.success) {
-                FailureMemoryEngine.recordFailure(
+                launchFailureEntryId = FailureMemoryEngine.recordFailure(
                     component = "APP_LAUNCH",
                     operation = targetQuery,
                     category = FailureCategory.RESOURCE,
                     rootCauseMm = "အပလီကေးရှင်း '$targetQuery' အား စက်ထဲတွင် မတွေ့ရှိပါ သို့မဟုတ် ဖွင့်၍မရပါ",
                     technicalDetails = "UniversalAppLauncher error: ${launchResult.error}",
                     suggestedRemediationMm = "အက်ပ်အမည် အသံထွက် မှန်ကန်မှု ရှိမရှိ စစ်ဆေးပါ သို့မဟုတ် Google Play မှ ထည့်သွင်းပါ"
-                )
+                ).errorLearningEntryId
             }
 
             val finalMsg = if (preWarning != null) "$preWarning\n\n${launchResult.userMessageMM}" else launchResult.userMessageMM
@@ -576,11 +582,12 @@ open class KyawGyiActionExecutor(val context: Context) {
                 executionConfirmed = launchResult.success,
                 errorCode = launchResult.error,
                 userMessage = finalMsg,
-                failurePreWarning = preWarning
+                failurePreWarning = preWarning,
+                errorLearningEntryId = launchFailureEntryId
             )
         } catch (e: Exception) {
             Log.e(TAG, "App Launch Error", e)
-            FailureMemoryEngine.recordFailure(
+            val catchFailureEntryId = FailureMemoryEngine.recordFailure(
                 component = "APP_LAUNCH",
                 operation = targetQuery,
                 category = FailureCategory.TECHNICAL,
@@ -588,7 +595,7 @@ open class KyawGyiActionExecutor(val context: Context) {
                 technicalDetails = "${e.javaClass.simpleName}: ${e.localizedMessage}",
                 suggestedRemediationMm = "ဖုန်းမျက်နှာပြင်မှတစ်ဆင့် အက်ပ်ကို ကိုယ်တိုင်ဖွင့်ကြည့်ပါ",
                 exception = e
-            )
+            ).errorLearningEntryId
             val baseMsg = "အက်ပ်ဖွင့်ရာတွင် အမှားဖြစ်ပွားပါသည်: ${e.localizedMessage}"
             val finalMsg = if (preWarning != null) "$preWarning\n\n$baseMsg" else baseMsg
             CommandResult(
@@ -600,7 +607,8 @@ open class KyawGyiActionExecutor(val context: Context) {
                 executionConfirmed = false,
                 errorCode = "EXECUTION_FAILED",
                 userMessage = finalMsg,
-                failurePreWarning = preWarning
+                failurePreWarning = preWarning,
+                errorLearningEntryId = catchFailureEntryId
             )
         }
     }

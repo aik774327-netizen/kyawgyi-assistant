@@ -38,7 +38,11 @@ object FailureMemoryEngine {
         val technicalDetails: String,
         val suggestedRemediationMm: String,
         val timestamp: Long = System.currentTimeMillis(),
-        val occurrences: Int = 1
+        val occurrences: Int = 1,
+        // ISSUE-037: the ErrorLearningWorkflowEngine ER entry this record was
+        // synced to — the failure-event id the pipeline uses to avoid
+        // minting a duplicate ER entry for the same failure.
+        val errorLearningEntryId: String? = null
     )
 
     // Component -> List of FailureRecords
@@ -135,6 +139,28 @@ object FailureMemoryEngine {
         suggestedRemediationMm: String,
         exception: Throwable? = null
     ): FailureRecord {
+        // Also synchronize with ErrorLearningWorkflowEngine so ER-00X 3-Factor logs appear in UI.
+        // ISSUE-037: the sync runs FIRST so the minted ER entry id can travel
+        // with the returned FailureRecord as the failure-event id.
+        val syncedErrorId = try {
+            com.example.audit.ErrorLearningWorkflowEngine.recordErrorLog(
+                task = "$component -> $operation",
+                // ISSUE-036: canonical key from the ONE factory, not a local
+                // "${component}_${operation}" namespace.
+                commandKey = com.example.audit.FailedMethodKeys.canonical(component, operation),
+                expectedResult = "$operation အောင်မြင်စွာ လုပ်ဆောင်နိုင်ရန်",
+                actualResult = rootCauseMm,
+                attemptedMethod = "$component.$operation",
+                evidence = technicalDetails,
+                recoveryAttempt = suggestedRemediationMm,
+                recoveryResult = "NOT_EXECUTED",
+                exception = exception
+            ).errorId
+        } catch (e: Exception) {
+            Log.w(TAG, "ErrorLearningWorkflowEngine sync note: ${e.message}")
+            null
+        }
+
         val list = failureHistory.computeIfAbsent(component) { CopyOnWriteArrayList() }
         val existing = list.find { it.operation == operation && it.failureCategory == category }
 
@@ -144,7 +170,8 @@ object FailureMemoryEngine {
                 timestamp = System.currentTimeMillis(),
                 rootCauseMm = rootCauseMm,
                 technicalDetails = technicalDetails,
-                suggestedRemediationMm = suggestedRemediationMm
+                suggestedRemediationMm = suggestedRemediationMm,
+                errorLearningEntryId = syncedErrorId ?: existing.errorLearningEntryId
             )
             list.remove(existing)
             list.add(0, updated)
@@ -158,7 +185,8 @@ object FailureMemoryEngine {
                 rootCauseMm = rootCauseMm,
                 technicalDetails = technicalDetails,
                 suggestedRemediationMm = suggestedRemediationMm,
-                occurrences = 1
+                occurrences = 1,
+                errorLearningEntryId = syncedErrorId
             )
             list.add(0, created)
             created
@@ -168,25 +196,6 @@ object FailureMemoryEngine {
             TAG,
             "⚠️ FAILURE RECORDED: component=$component, op=$operation, cat=${category.code}, times=${newRecord.occurrences}, rootCause=$rootCauseMm"
         )
-
-        // Also synchronize with ErrorLearningWorkflowEngine so ER-00X 3-Factor logs appear in UI
-        try {
-            com.example.audit.ErrorLearningWorkflowEngine.recordErrorLog(
-                task = "$component -> $operation",
-                // ISSUE-036: canonical key from the ONE factory, not a local
-                // "${component}_${operation}" namespace.
-                commandKey = com.example.audit.FailedMethodKeys.canonical(component, operation),
-                expectedResult = "$operation အောင်မြင်စွာ လုပ်ဆောင်နိုင်ရန်",
-                actualResult = rootCauseMm,
-                attemptedMethod = "$component.$operation",
-                evidence = technicalDetails,
-                recoveryAttempt = suggestedRemediationMm,
-                recoveryResult = "NOT_EXECUTED",
-                exception = exception
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "ErrorLearningWorkflowEngine sync note: ${e.message}")
-        }
 
         // Asynchronously persist to Room Database so it survives process recreation / device reboots
         val ctx = appContext

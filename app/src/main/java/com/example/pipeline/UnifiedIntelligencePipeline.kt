@@ -584,10 +584,14 @@ class UnifiedIntelligencePipeline(
                 context = context,
                 commandText = rawInput,
                 commandType = registryActionType,
-                rawDetail = verifiedResult.reason ?: verifiedResult.errorCode,
+                rawDetail = (verifiedResult.reason ?: verifiedResult.errorCode ?: "") +
+                    (executionResult.errorLearningEntryId?.let { " [ER cross-ref: $it]" } ?: ""),
                 isRepeated = previousFailureWarning != null
             )
-            com.example.audit.ErrorLearningWorkflowEngine.recordErrorLog(
+            // ISSUE-037: if the executor already minted an ER entry for this
+            // exact failure event, cross-reference it instead of minting a twin.
+            com.example.audit.ErrorLearningWorkflowEngine.recordFailureOnce(
+                executorEntryId = executionResult.errorLearningEntryId,
                 task = "$registryActionType (${finalTarget ?: cleanedText})",
                 commandKey = failureKey,
                 expectedResult = "$registryActionType အောင်မြင်စွာ ဆောင်ရွက်ရန်",
@@ -707,7 +711,8 @@ class UnifiedIntelligencePipeline(
                         target = target,
                         parameters = parameters,
                         reason = cmdResult.userMessage,
-                        executionTimeMs = System.currentTimeMillis() - startTime
+                        executionTimeMs = System.currentTimeMillis() - startTime,
+                        errorLearningEntryId = cmdResult.errorLearningEntryId
                     )
                 }
                 "VOLUME_UP", "VOLUME_DOWN", "SET_VOLUME", "MUTE", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN" -> {
@@ -735,7 +740,8 @@ class UnifiedIntelligencePipeline(
                             target = target,
                             parameters = parameters,
                             reason = cmdResult.userMessage,
-                            executionTimeMs = System.currentTimeMillis() - startTime
+                            executionTimeMs = System.currentTimeMillis() - startTime,
+                            errorLearningEntryId = cmdResult.errorLearningEntryId
                         )
                     }
                 }
@@ -749,7 +755,8 @@ class UnifiedIntelligencePipeline(
                         target = target,
                         parameters = parameters,
                         reason = cmdResult.userMessage,
-                        executionTimeMs = System.currentTimeMillis() - startTime
+                        executionTimeMs = System.currentTimeMillis() - startTime,
+                        errorLearningEntryId = cmdResult.errorLearningEntryId
                     )
                 }
                 "WIFI_TOGGLE" -> {
@@ -762,7 +769,8 @@ class UnifiedIntelligencePipeline(
                         target = target,
                         parameters = parameters,
                         reason = cmdResult.userMessage,
-                        executionTimeMs = System.currentTimeMillis() - startTime
+                        executionTimeMs = System.currentTimeMillis() - startTime,
+                        errorLearningEntryId = cmdResult.errorLearningEntryId
                     )
                 }
                 "BLUETOOTH_TOGGLE" -> {
@@ -775,7 +783,8 @@ class UnifiedIntelligencePipeline(
                         target = target,
                         parameters = parameters,
                         reason = cmdResult.userMessage,
-                        executionTimeMs = System.currentTimeMillis() - startTime
+                        executionTimeMs = System.currentTimeMillis() - startTime,
+                        errorLearningEntryId = cmdResult.errorLearningEntryId
                     )
                 }
                 "BACK" -> {
@@ -855,7 +864,8 @@ class UnifiedIntelligencePipeline(
                         target = target,
                         parameters = cmdResult.parameters,
                         reason = cmdResult.userMessage,
-                        executionTimeMs = System.currentTimeMillis() - startTime
+                        executionTimeMs = System.currentTimeMillis() - startTime,
+                        errorLearningEntryId = cmdResult.errorLearningEntryId
                     )
                 }
                 "CALL", "CALL_CONTACT", "CALL_PHONE" -> {
@@ -868,7 +878,8 @@ class UnifiedIntelligencePipeline(
                         target = target,
                         parameters = cmdResult.parameters,
                         reason = cmdResult.userMessage,
-                        executionTimeMs = System.currentTimeMillis() - startTime
+                        executionTimeMs = System.currentTimeMillis() - startTime,
+                        errorLearningEntryId = cmdResult.errorLearningEntryId
                     )
                 }
                 "SEND_MESSAGE", "SEND_SMS" -> {
@@ -882,7 +893,8 @@ class UnifiedIntelligencePipeline(
                         target = target,
                         parameters = cmdResult.parameters,
                         reason = cmdResult.userMessage,
-                        executionTimeMs = System.currentTimeMillis() - startTime
+                        executionTimeMs = System.currentTimeMillis() - startTime,
+                        errorLearningEntryId = cmdResult.errorLearningEntryId
                     )
                 }
                 "INGEST_FILE" -> {
