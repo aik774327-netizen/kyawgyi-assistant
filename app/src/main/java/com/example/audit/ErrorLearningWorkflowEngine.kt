@@ -580,6 +580,40 @@ object ErrorLearningWorkflowEngine {
             environmentState = taxonomy.name
         )
 
+        // ISSUE-038: same key + same taxonomy inside the same UNRESOLVED
+        // episode updates the existing entry in place (occurrenceCount + a
+        // RETRY_ATTEMPTED history note) instead of minting a new ER ID —
+        // the ER-008/ER-015/ER-016 flooding defect. A resolved episode or a
+        // different taxonomy falls through and mints a fresh entry below.
+        val episodeEntry = failedMethodMemory[normKey]
+        if (episodeEntry != null &&
+            episodeEntry.errorType == taxonomy &&
+            (episodeEntry.status == ErrorLifecycleStatus.BLOCKED || episodeEntry.status == ErrorLifecycleStatus.FAILED)
+        ) {
+            val updated = episodeEntry.copy(
+                dateTime = dateStr,
+                timestampMs = now,
+                lastSeenMs = now,
+                actualResult = SensitiveDataRedactor.redactForAuditLog(actualResult),
+                evidence = safeEvidence,
+                occurrenceCount = episodeEntry.occurrenceCount + 1,
+                errorCode = resolvedErrorCode.ifBlank { episodeEntry.errorCode },
+                exceptionClass = exception?.javaClass?.name ?: episodeEntry.exceptionClass,
+                exceptionMessage = exception?.message?.let {
+                    SensitiveDataRedactor.redactForAuditLog(it).take(300)
+                } ?: episodeEntry.exceptionMessage,
+                statusTransitionHistory = episodeEntry.statusTransitionHistory +
+                    "RETRY_ATTEMPTED -> FAILED (occurrence ${episodeEntry.occurrenceCount + 1}; same unresolved episode)"
+            )
+            val histIdx = errorLogHistory.indexOfLast { it.errorId == episodeEntry.errorId }
+            if (histIdx >= 0) errorLogHistory[histIdx] = updated
+            failedMethodMemory[normKey] = updated
+            saveToPersistentStorage()
+            publishStateFlows()
+            Log.w(TAG, "ISSUE-038: repeat failure for '$commandKey' updated ${updated.errorId} in place (occurrence ${updated.occurrenceCount}); no new ER ID minted.")
+            return updated
+        }
+
         // Check if an existing entry for this commandKey exists in history to increment occurrenceCount without deleting history
         val existingIdx = errorLogHistory.indexOfLast { it.commandKey == normKey }
         val existingEntry = if (existingIdx >= 0) errorLogHistory[existingIdx] else null
