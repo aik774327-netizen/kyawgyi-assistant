@@ -12,6 +12,10 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.AppDatabase
 import com.example.data.CommandLogEntity
+import com.example.utils.AndroidTtsProbe
+import com.example.utils.MyanmarTTSVoicePackManager
+import com.example.utils.TtsConditionVerifier
+import com.example.utils.TtsProbe
 import com.kyawgyi.pipeline.SensitiveDataRedactor
 import com.kyawgyi.voice.ModelManager
 import kotlinx.coroutines.CoroutineScope
@@ -374,6 +378,23 @@ object ErrorLearningWorkflowEngine {
     private val failedMethodMemory = ConcurrentHashMap<String, ErrorLogEntry>()
     private val dbSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * ISSUE-033: injectable TTS probe factory so unit tests can drive the
+     * staged live TTS verifier with fakes. Null in production, where
+     * [AndroidTtsProbe] is used.
+     */
+    @Volatile
+    internal var ttsProbeFactoryForTesting: ((Context) -> TtsProbe)? = null
+
+    /**
+     * ISSUE-033: short-lived cache of TTS verification results per command key,
+     * so repeated guard checks do not re-run an audible probe utterance.
+     */
+    private data class CachedVerification(val result: VerificationResult, val cachedAtMs: Long)
+
+    private val ttsVerificationCache = ConcurrentHashMap<String, CachedVerification>()
+    private const val TTS_VERIFICATION_CACHE_TTL_MS = 60_000L
+
     @Volatile
     private var appContext: Context? = null
     private var prefs: SharedPreferences? = null
@@ -612,10 +633,10 @@ object ErrorLearningWorkflowEngine {
         }
 
         if (context != null) {
-            val liveEvidence = verifyLiveEnvironmentConditions(context, previousLog)
-            if (liveEvidence != null) {
-                Log.i(TAG, "Live Condition Verifier confirmed environment resolved for '$key': $liveEvidence")
-                clearFailedMethodWithVerifiedEvidence(key, liveEvidence)
+            val liveResult = verifyLiveEnvironmentConditions(context, previousLog)
+            if (liveResult != null && liveResult.outcome == VerificationOutcome.VERIFIED) {
+                Log.i(TAG, "Live Condition Verifier confirmed environment resolved for '$key': ${liveResult.summaryLine()}")
+                clearFailedMethodWithVerifiedEvidence(key, liveResult.summaryLine())
                 return null
             }
         }
@@ -640,14 +661,20 @@ object ErrorLearningWorkflowEngine {
         )
     }
 
-    fun verifyLiveEnvironmentConditions(context: Context, previousLog: ErrorLogEntry): String? {
+    /**
+     * ISSUE-033/034 — Live Condition Verifier. Returns a typed
+     * [VerificationResult] produced by a REAL check, or null when no verifier
+     * branch applies to this record. A record may clear ONLY when the result
+     * outcome is [VerificationOutcome.VERIFIED].
+     */
+    fun verifyLiveEnvironmentConditions(context: Context, previousLog: ErrorLogEntry): VerificationResult? {
         return try {
             val lowerKeyAndEv = (previousLog.commandKey + " " + previousLog.task + " " + previousLog.evidence).lowercase(Locale.ROOT)
             if (lowerKeyAndEv.contains("tts_synthesis") || lowerKeyAndEv.contains("speak_burmese") || lowerKeyAndEv.contains("voicepackstatus") || lowerKeyAndEv.contains("com.google.android.tts")) {
-                return "Verified via MyanmarTTSEngine: Universal Burmese Phonetic G2P Fallback is active on com.google.android.tts."
+                return verifyTtsCondition(context, previousLog)
             }
 
-            when (previousLog.errorType) {
+            val evidence: Pair<String, String>? = when (previousLog.errorType) {
                 ErrorTaxonomy.NETWORK_REALITY_ERROR -> {
                     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
                     val network = cm?.activeNetwork
@@ -656,7 +683,7 @@ object ErrorLearningWorkflowEngine {
                         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                     if (isOnline) {
-                        "Verified via ConnectivityManager: NET_CAPABILITY_INTERNET & VALIDATED are now active."
+                        "CONNECTIVITY_MANAGER" to "Verified via ConnectivityManager: NET_CAPABILITY_INTERNET & VALIDATED are now active."
                     } else null
                 }
 
@@ -664,7 +691,7 @@ object ErrorLearningWorkflowEngine {
                     val lowerEv = previousLog.evidence.lowercase(Locale.ROOT)
                     if (lowerEv.contains("overlay")) {
                         if (Settings.canDrawOverlays(context)) {
-                            "Verified via Settings.canDrawOverlays: Overlay permission is now granted."
+                            "SETTINGS_OVERLAY" to "Verified via Settings.canDrawOverlays: Overlay permission is now granted."
                         } else null
                     } else {
                         val enabledServices = Settings.Secure.getString(
@@ -672,7 +699,7 @@ object ErrorLearningWorkflowEngine {
                             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
                         ) ?: ""
                         if (enabledServices.contains(context.packageName)) {
-                            "Verified via Settings.Secure: Accessibility service is now enabled for ${context.packageName}."
+                            "SETTINGS_SECURE_ACCESSIBILITY" to "Verified via Settings.Secure: Accessibility service is now enabled for ${context.packageName}."
                         } else null
                     }
                 }
@@ -689,23 +716,58 @@ object ErrorLearningWorkflowEngine {
                     if (requiredPerm != null &&
                         ContextCompat.checkSelfPermission(context, requiredPerm) == PackageManager.PERMISSION_GRANTED
                     ) {
-                        "Verified via ContextCompat.checkSelfPermission: $requiredPerm is now PERMISSION_GRANTED."
+                        "CONTEXT_COMPAT_PERMISSION" to "Verified via ContextCompat.checkSelfPermission: $requiredPerm is now PERMISSION_GRANTED."
                     } else null
                 }
 
                 ErrorTaxonomy.RESOURCE_UNAVAILABLE_ERROR -> {
                     val modelManager = ModelManager(context)
                     if (modelManager.isSherpaOnnxModelAvailable() || modelManager.isVoskModelAvailable()) {
-                        "Verified via ModelManager: Offline speech model files are now present on disk."
+                        "MODEL_MANAGER_FILES" to "Verified via ModelManager: Offline speech model files are now present on disk."
                     } else null
                 }
 
                 else -> null
             }
+            evidence?.let { (source, detail) ->
+                VerificationResult(
+                    outcome = VerificationOutcome.VERIFIED,
+                    errorId = previousLog.errorId,
+                    commandKey = previousLog.commandKey,
+                    checkedAtMs = System.currentTimeMillis(),
+                    evidenceSource = source,
+                    detail = detail
+                )
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Live Condition Verifier check encountered exception: ${e.message}")
             null
         }
+    }
+
+    /**
+     * ISSUE-033 — staged TTS verification via [TtsConditionVerifier].
+     * Results are cached per command key for [TTS_VERIFICATION_CACHE_TTL_MS]
+     * so repeated guard checks do not re-run an audible probe utterance.
+     * Must be called off the main thread (the probe blocks with bounded waits).
+     */
+    private fun verifyTtsCondition(context: Context, previousLog: ErrorLogEntry): VerificationResult {
+        val cacheKey = previousLog.commandKey
+        val now = System.currentTimeMillis()
+        val cached = ttsVerificationCache[cacheKey]
+        if (cached != null && now - cached.cachedAtMs < TTS_VERIFICATION_CACHE_TTL_MS) {
+            return cached.result
+        }
+        val probe = ttsProbeFactoryForTesting?.invoke(context)
+            ?: AndroidTtsProbe(
+                context,
+                MyanmarTTSVoicePackManager.getInstance(context).currentEnginePackage.value
+                    .takeIf { it.isNotBlank() }
+                    ?: MyanmarTTSVoicePackManager.getBestTtsEnginePackage(context)
+            )
+        val result = TtsConditionVerifier.verify(previousLog.errorId, previousLog.commandKey, probe, now)
+        ttsVerificationCache[cacheKey] = CachedVerification(result, now)
+        return result
     }
 
     /**
@@ -755,6 +817,8 @@ object ErrorLearningWorkflowEngine {
         sequenceCounter.set(1)
         errorLogHistory.clear()
         failedMethodMemory.clear()
+        ttsVerificationCache.clear()
+        ttsProbeFactoryForTesting = null
         prefs?.edit()?.clear()?.commit()
         publishStateFlows()
     }
