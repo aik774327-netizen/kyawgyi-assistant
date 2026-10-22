@@ -133,6 +133,11 @@ class VoiceSessionManager(
         ttsEngine = MyanmarTTSEngine(context) { ready ->
             Log.d(TAG, "MyanmarTTSEngine init result: $ready")
         }
+        // FIX-06: register with the microphone arbiter — any other
+        // owner starting a session stops this one via stopSession().
+        VoiceSessionArbiter.registerStopper(VoiceSessionOwner.IN_APP_SESSION) {
+            stopSession()
+        }
     }
 
     fun addListener(listener: VoiceSessionListener) {
@@ -214,6 +219,8 @@ class VoiceSessionManager(
      * Start Command Listening Session (User starts speaking their query)
      */
     fun startCommandListening() {
+        // FIX-06: claim the microphone (preempts any current owner).
+        VoiceSessionArbiter.requestOwnership(VoiceSessionOwner.IN_APP_SESSION)
         scope.launch {
             stateMutex.withLock {
                 startCommandListeningInternal()
@@ -369,6 +376,8 @@ class VoiceSessionManager(
      * COMMAND_LISTENING pretending to listen.
      */
     private fun endSessionWithRecognizerFailure(kind: RecognizerErrorKind) {
+        // FIX-06: a failed session no longer owns the microphone.
+        VoiceSessionArbiter.releaseOwnership(VoiceSessionOwner.IN_APP_SESSION)
         if (RecognizerErrorMapping.isLanguageSupportError(kind)) {
             cachedVerdictLanguage = lastRequestedLanguage
             cachedLanguageVerdict = LanguageSupportVerdict.NOT_SUPPORTED
@@ -579,6 +588,8 @@ class VoiceSessionManager(
      * Safe Debounced Stop Session
      */
     fun stopSession() {
+        // FIX-06: hand the microphone back.
+        VoiceSessionArbiter.releaseOwnership(VoiceSessionOwner.IN_APP_SESSION)
         scope.launch {
             stateMutex.withLock {
                 val now = System.currentTimeMillis()
@@ -605,6 +616,8 @@ class VoiceSessionManager(
     }
 
     fun destroy() {
+        // FIX-06: leave arbitration cleanly.
+        VoiceSessionArbiter.unregisterStopper(VoiceSessionOwner.IN_APP_SESSION)
         cancelAllTimers()
         stopRecognizerListening()
         audioManager.abandonTtsFocus()

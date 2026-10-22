@@ -69,7 +69,6 @@ import com.example.googlehome.ui.GoogleHomeScreen
 import com.example.permission.VoicePermissionHelper
 import com.example.ui.components.VoicePermissionRationaleDialog
 import com.example.service.KyawGyiFloatingService
-import com.example.service.KyawGyiOverlayService
 import com.example.ui.AngelViewModel
 import com.example.ui.components.DashboardActiveFocusCard
 import com.example.ui.components.DashboardCategorizedTasksCard
@@ -1402,7 +1401,8 @@ fun DashboardHomeContent(
                 if (isServiceActive) {
                     KyawGyiServiceController.stopService(context)
                     context.stopService(Intent(context, KyawGyiFloatingService::class.java))
-                    context.stopService(Intent(context, KyawGyiOverlayService::class.java))
+                    // FIX-06: KyawGyiOverlayService stop removed with
+                    // the service itself (never started; dead code).
                     isServiceActive = false
                 } else {
                     KyawGyiServiceController.startService(context)

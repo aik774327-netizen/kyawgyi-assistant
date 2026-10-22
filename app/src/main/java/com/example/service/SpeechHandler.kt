@@ -37,6 +37,14 @@ class SpeechHandler(
         private const val MAX_CONSECUTIVE_ERRORS = 4
     }
 
+    init {
+        // FIX-06: register with the microphone arbiter — any other
+        // owner starting a session stops the bubble via stopListening().
+        com.example.engine.VoiceSessionArbiter.registerStopper(
+            com.example.engine.VoiceSessionOwner.BUBBLE
+        ) { stopListening() }
+    }
+
     private var speechRecognizer: SpeechRecognizer? = null
     var isListening = false
         private set
@@ -62,6 +70,11 @@ class SpeechHandler(
             handler.post { startContinuousListening() }
             return
         }
+
+        // FIX-06: claim the microphone (preempts any current owner).
+        com.example.engine.VoiceSessionArbiter.requestOwnership(
+            com.example.engine.VoiceSessionOwner.BUBBLE
+        )
 
         if (androidx.core.content.ContextCompat.checkSelfPermission(
                 context,
@@ -298,12 +311,20 @@ class SpeechHandler(
             handler.post { stopListening() }
             return
         }
+        // FIX-06: hand the microphone back.
+        com.example.engine.VoiceSessionArbiter.releaseOwnership(
+            com.example.engine.VoiceSessionOwner.BUBBLE
+        )
         cancelPendingRestarts()
         destroyRecognizerSafely()
     }
 
     fun destroy() {
         isDestroyed = true
+        // FIX-06: leave arbitration cleanly.
+        com.example.engine.VoiceSessionArbiter.unregisterStopper(
+            com.example.engine.VoiceSessionOwner.BUBBLE
+        )
         stopListening()
         handler.removeCallbacksAndMessages(null)
     }

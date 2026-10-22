@@ -52,6 +52,14 @@ class DictationRecognizerController(
     private val appContext: Context = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    init {
+        // FIX-06: register with the microphone arbiter — any other
+        // owner starting a session stops dictation via stop().
+        com.example.engine.VoiceSessionArbiter.registerStopper(
+            com.example.engine.VoiceSessionOwner.DICTATION
+        ) { stop() }
+    }
+
     private var speechRecognizer: SpeechRecognizer? = null
     private var destroyed = false
     private var sessionEndSignalled = false
@@ -70,6 +78,10 @@ class DictationRecognizerController(
             mainHandler.post { start(languageCode) }
             return
         }
+        // FIX-06: claim the microphone (preempts any current owner).
+        com.example.engine.VoiceSessionArbiter.requestOwnership(
+            com.example.engine.VoiceSessionOwner.DICTATION
+        )
         destroyRecognizerSafely()
         sessionEndSignalled = false
         try {
@@ -109,11 +121,19 @@ class DictationRecognizerController(
             mainHandler.post { stop() }
             return
         }
+        // FIX-06: hand the microphone back.
+        com.example.engine.VoiceSessionArbiter.releaseOwnership(
+            com.example.engine.VoiceSessionOwner.DICTATION
+        )
         destroyRecognizerSafely()
     }
 
     fun destroy() {
         destroyed = true
+        // FIX-06: leave arbitration cleanly.
+        com.example.engine.VoiceSessionArbiter.unregisterStopper(
+            com.example.engine.VoiceSessionOwner.DICTATION
+        )
         stop()
         mainHandler.removeCallbacksAndMessages(null)
     }

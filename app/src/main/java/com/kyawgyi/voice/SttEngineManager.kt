@@ -215,6 +215,14 @@ class SttEngineManager(
     }
 
     fun startListening() {
+        // FIX-06: register our stopper, then claim the microphone
+        // (preempts any current owner).
+        com.example.engine.VoiceSessionArbiter.registerStopper(
+            com.example.engine.VoiceSessionOwner.IR_SERVICE
+        ) { stopListening() }
+        com.example.engine.VoiceSessionArbiter.requestOwnership(
+            com.example.engine.VoiceSessionOwner.IR_SERVICE
+        )
         Log.i(TAG, "SttEngineManager starting listening session (active=${activeEngine?.engineType})...")
         setEngineStateThreadSafe(SttEngineState.LISTENING)
         activeEngine?.startListening()
@@ -227,6 +235,10 @@ class SttEngineManager(
     }
 
     fun stopListening() {
+        // FIX-06: hand the microphone back.
+        com.example.engine.VoiceSessionArbiter.releaseOwnership(
+            com.example.engine.VoiceSessionOwner.IR_SERVICE
+        )
         Log.i(TAG, "SttEngineManager stopping listening session.")
         activeEngine?.stopListening()
         if (activeEngine != systemEngine) {

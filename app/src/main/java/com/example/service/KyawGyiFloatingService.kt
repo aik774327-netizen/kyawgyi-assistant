@@ -325,11 +325,16 @@ class KyawGyiFloatingService : Service() {
             }
         )
 
-        // Avoid immediate dual-SpeechRecognizer collision if VoiceForegroundService is already active;
-        // Floating Bubble starts listening on user tap or if background service is not running.
-        if (!com.kyawgyi.ir.service.VoiceForegroundService.isServiceRunning.value) {
-            speechHandler?.startContinuousListening()
-        }
+        // FIX-06 (defect D4): the bubble no longer grabs the
+        // microphone on service create. Previously this block started
+        // continuous listening unconditionally whenever the IR
+        // service wasn't running — so merely opening the app (which
+        // starts this service from MainActivity.onResume) began an
+        // invisible listening session alongside the in-app one.
+        // Listening now starts ONLY from an explicit user action:
+        // bubble tap or swipe-down restart (both call
+        // startContinuousListening, which arbitrates via
+        // VoiceSessionArbiter). The bubble view itself is unchanged.
     }
 
     private fun setMicVisualState(stateColor: String, text: String) {

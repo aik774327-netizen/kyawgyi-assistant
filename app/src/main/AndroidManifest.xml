@@ -130,13 +130,6 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Kyaw Gyi Overlay Mic Service -->
-        <service
-            android:name="com.example.service.KyawGyiOverlayService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
-
         <!-- Kyaw Gyi Floating Assistive Touch Mic Service -->
         <service
             android:name="com.example.service.KyawGyiFloatingService"

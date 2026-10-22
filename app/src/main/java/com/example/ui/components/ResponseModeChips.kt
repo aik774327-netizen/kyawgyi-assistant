@@ -351,6 +351,10 @@ fun ResponseModeChips(
                         override fun onEndOfSpeech() { isListening = false }
                         override fun onError(error: Int) {
                             isListening = false
+                            // FIX-06: hand the microphone back.
+                            com.example.engine.VoiceSessionArbiter.releaseOwnership(
+                                com.example.engine.VoiceSessionOwner.CHAT_MIC
+                            )
                             // If service is busy or language pack unavailable on direct binder, try system voice dialog once
                             if (error == android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
                                 error == android.speech.SpeechRecognizer.ERROR_CLIENT ||
@@ -367,6 +371,10 @@ fun ResponseModeChips(
                         }
                         override fun onResults(results: android.os.Bundle?) {
                             isListening = false
+                            // FIX-06: hand the microphone back.
+                            com.example.engine.VoiceSessionArbiter.releaseOwnership(
+                                com.example.engine.VoiceSessionOwner.CHAT_MIC
+                            )
                             val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                             if (!matches.isNullOrEmpty()) {
                                 val normalized = com.example.nlu.BurmeseNluPreprocessor.normalize(matches[0])
@@ -389,6 +397,11 @@ fun ResponseModeChips(
                         }
                         override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
                     })
+                    // FIX-06: claim the microphone (preempts any
+                    // current owner — bubble, dictation, in-app session).
+                    com.example.engine.VoiceSessionArbiter.requestOwnership(
+                        com.example.engine.VoiceSessionOwner.CHAT_MIC
+                    )
                     recognizer.startListening(intent)
                 }
 
@@ -407,7 +420,23 @@ fun ResponseModeChips(
                 }
 
                 DisposableEffect(Unit) {
+                    // FIX-06: the chat mic is a first-class arbitration
+                    // owner — other owners can stop it via this stopper,
+                    // and dispose leaves arbitration cleanly.
+                    com.example.engine.VoiceSessionArbiter.registerStopper(
+                        com.example.engine.VoiceSessionOwner.CHAT_MIC
+                    ) {
+                        try {
+                            activeRecognizerRef.value?.stopListening()
+                            activeRecognizerRef.value?.destroy()
+                            activeRecognizerRef.value = null
+                        } catch (_: Exception) {}
+                        isListening = false
+                    }
                     onDispose {
+                        com.example.engine.VoiceSessionArbiter.unregisterStopper(
+                            com.example.engine.VoiceSessionOwner.CHAT_MIC
+                        )
                         try {
                             activeRecognizerRef.value?.stopListening()
                             activeRecognizerRef.value?.destroy()
