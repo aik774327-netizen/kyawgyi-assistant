@@ -525,21 +525,36 @@ open class KyawGyiActionExecutor(val context: Context) {
         return try {
             val label = appNameMM.ifBlank { packageNameOrQuery.ifBlank { "အက်ပ်" } }
 
-            // 1. If Accessibility Service is running, use it to perform Home or Back
+            // 1. If Accessibility Service is running, use it to perform Home or Back.
+            //    Its Boolean return is this mechanism's dispatch result — record it
+            //    (previously it was captured but discarded for reporting, ISSUE-027).
             val accessibilityService = com.example.service.KyawGyiAccessibilityService.instance
-            var closedViaAccessibility = false
+            var homeViaAccessibility = false
             if (accessibilityService != null) {
-                closedViaAccessibility = accessibilityService.performGlobalAction(
+                homeViaAccessibility = accessibilityService.performGlobalAction(
                     android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
                 )
             }
 
-            // 2. Also send Home intent to ensure device returns to launcher / minimizes app
+            // 2. Also send Home intent to ensure device returns to launcher / minimizes app.
+            //    Record whether this dispatch itself succeeded instead of letting a
+            //    failure vanish into the generic catch (ISSUE-027).
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
             }
-            context.startActivity(homeIntent)
+            var homeViaIntent = false
+            try {
+                context.startActivity(homeIntent)
+                homeViaIntent = true
+            } catch (e: Exception) {
+                Log.d(TAG, "Home intent dispatch failed: ${e.message}")
+            }
+
+            // What was actually performed: at most, a Home-screen navigation dispatch.
+            // Whether the named app actually closed cannot be verified through Android
+            // public APIs, so it is never claimed in the result or the audit log below.
+            val homeDispatched = homeViaAccessibility || homeViaIntent
 
             // 3. Kill background processes if specific package is targeted
             if (packageNameOrQuery.contains(".")) {
@@ -556,10 +571,49 @@ open class KyawGyiActionExecutor(val context: Context) {
                 com.example.engine.CommandContextManager.getInstance().resetContext()
             } catch (ignored: Exception) {}
 
+            if (!homeDispatched) {
+                // Neither mechanism dispatched: report an honest failure (and audit it)
+                // instead of the previous unconditional success.
+                FailureMemoryEngine.recordFailure(
+                    component = "APP_CLOSE",
+                    operation = targetQuery,
+                    category = FailureCategory.TECHNICAL,
+                    rootCauseMm = "ပင်မစာမျက်နှာသို့ ပြန်ရန် လုပ်ဆောင်ချက် မအောင်မြင်ပါ",
+                    technicalDetails = "GLOBAL_ACTION_HOME returned $homeViaAccessibility and the Home intent failed to dispatch",
+                    suggestedRemediationMm = "Accessibility Service ခွင့်ပြုချက် ပေးထားခြင်း ရှိမရှိ စစ်ဆေးပါ"
+                )
+                AuditLogger.log(
+                    rawQuery = appNameMM,
+                    normalizedQuery = packageNameOrQuery,
+                    resolutionPath = ResolutionPath.EXACT_FASTPATH,
+                    targetAction = "CLOSE_APP",
+                    confidence = 0.0f,
+                    isSuccess = false,
+                    details = "target=$packageNameOrQuery, accessibility=$homeViaAccessibility, homeIntent=$homeViaIntent, homeDispatched=false, appClosureVerified=false"
+                )
+                val failMsg = "ပင်မစာမျက်နှာသို့ ပြန်သွား၍ မရပါခင်ဗျာ။"
+                val finalFailMsg = if (preWarning != null) "$preWarning\n\n$failMsg" else failMsg
+                return CommandResult(
+                    isSuccess = false,
+                    action = "CLOSE_APP",
+                    target = packageNameOrQuery,
+                    parameters = mapOf("appName" to label),
+                    executionStarted = false,
+                    executionConfirmed = false,
+                    errorCode = "HOME_NAVIGATION_FAILED",
+                    userMessage = finalFailMsg,
+                    failurePreWarning = preWarning
+                )
+            }
+
+            // Honest report (ISSUE-027): the device was navigated to the Home screen.
+            // The named app being closed is UNVERIFIABLE via public APIs, so the
+            // message says exactly that and executionConfirmed stays false; isSuccess
+            // covers only the Home-navigation dispatch that actually happened.
             val baseMsg = if (label.isNotBlank() && label != "အက်ပ်") {
-                "ဟုတ်ကဲ့၊ $label အက်ပ်ကို ပိတ်ပြီး ပင်မစာမျက်နှာသို့ ပြန်လည်ရောက်ရှိပါပြီခင်ဗျာ။"
+                "ဟုတ်ကဲ့၊ ပင်မစာမျက်နှာသို့ ပြန်သွားပါပြီခင်ဗျာ။ $label အက်ပ် ပိတ်သွားကြောင်းကိုတော့ အတည်မပြုနိုင်ပါခင်ဗျာ။"
             } else {
-                "ဟုတ်ကဲ့၊ လက်ရှိအက်ပ်ကို ပိတ်ပြီး ပင်မစာမျက်နှာသို့ ပြန်လည်ရောက်ရှိပါပြီခင်ဗျာ။"
+                "ဟုတ်ကဲ့၊ ပင်မစာမျက်နှာသို့ ပြန်သွားပါပြီခင်ဗျာ။ လက်ရှိအက်ပ် ပိတ်သွားကြောင်းကိုတော့ အတည်မပြုနိုင်ပါခင်ဗျာ။"
             }
             val finalMsg = if (preWarning != null) "$preWarning\n\n$baseMsg" else baseMsg
 
@@ -568,9 +622,9 @@ open class KyawGyiActionExecutor(val context: Context) {
                 normalizedQuery = packageNameOrQuery,
                 resolutionPath = ResolutionPath.EXACT_FASTPATH,
                 targetAction = "CLOSE_APP",
-                confidence = 1.0f,
+                confidence = 0.95f,
                 isSuccess = true,
-                details = "target=$packageNameOrQuery, accessibility=$closedViaAccessibility"
+                details = "target=$packageNameOrQuery, accessibility=$homeViaAccessibility, homeIntent=$homeViaIntent, homeDispatched=true, appClosureVerified=false"
             )
 
             CommandResult(
@@ -579,7 +633,7 @@ open class KyawGyiActionExecutor(val context: Context) {
                 target = packageNameOrQuery,
                 parameters = mapOf("appName" to label),
                 executionStarted = true,
-                executionConfirmed = true,
+                executionConfirmed = false,
                 userMessage = finalMsg,
                 failurePreWarning = preWarning
             )
