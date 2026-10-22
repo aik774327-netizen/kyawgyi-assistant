@@ -111,8 +111,15 @@ class CallSmsConfirmationCoordinator private constructor() {
 
     /**
      * Checks if given speech text expresses affirmative confirmation.
+     *
+     * ISSUE-029 (Phase 1.5): cancellation takes precedence — a reply
+     * that matches any cancellation form (e.g. the mixed reply
+     * "ဟုတ်ကဲ့ မခေါ်ပါနဲ့", "yes, but don't call") is NEVER a
+     * confirmation, even though it also contains an affirmative
+     * keyword. Call/SMS may only execute on an unambiguous affirmative.
      */
     fun isConfirmation(text: String): Boolean {
+        if (isCancellation(text)) return false
         val clean = text.trim().lowercase()
         return confirmationKeywords.any { keyword ->
             clean == keyword || clean.contains(keyword)

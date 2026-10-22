@@ -293,13 +293,19 @@ class KyawGyiIntentRouter {
     fun parseAndExecute(spokenText: String, executor: KyawGyiActionExecutor): Pair<Boolean, String> {
         val confirmationCoordinator = com.example.actions.CallSmsConfirmationCoordinator.getInstance()
         if (confirmationCoordinator.hasPendingAction()) {
-            if (confirmationCoordinator.isConfirmation(spokenText)) {
-                val outcome = confirmationCoordinator.executeConfirmed(executor.context)
-                contextManager.recordTurn(spokenText, "CONFIRM_COMMUNICATION", outcome.userMessage)
-                return true to outcome.userMessage
-            } else if (confirmationCoordinator.isCancellation(spokenText)) {
+            // ISSUE-029 (Phase 1.5): cancellation is evaluated BEFORE
+            // confirmation, so a mixed reply ("ဟုတ်ကဲ့ မခေါ်ပါနဲ့")
+            // cancels the staged action instead of executing it.
+            // (The coordinator's isConfirmation also refuses any reply
+            // that matches a cancellation form — defence in depth at
+            // both sites named by the finding.)
+            if (confirmationCoordinator.isCancellation(spokenText)) {
                 val outcome = confirmationCoordinator.cancelPending("User explicit cancellation")
                 contextManager.recordTurn(spokenText, "CANCEL_COMMUNICATION", outcome.userMessage)
+                return true to outcome.userMessage
+            } else if (confirmationCoordinator.isConfirmation(spokenText)) {
+                val outcome = confirmationCoordinator.executeConfirmed(executor.context)
+                contextManager.recordTurn(spokenText, "CONFIRM_COMMUNICATION", outcome.userMessage)
                 return true to outcome.userMessage
             }
         }
