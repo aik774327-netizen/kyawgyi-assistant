@@ -33,7 +33,17 @@ class MyanmarActionPlanner {
                 EntityType.SONG_TITLE -> params["songTitle"] = e.value
                 EntityType.TIME_EXPRESSION -> params["time"] = e.value
                 EntityType.SETTING_NAME -> params["setting"] = e.value
-                EntityType.SETTING_STATE -> params["state"] = e.value
+                EntityType.SETTING_STATE -> {
+                    params["state"] = e.value
+                    // ISSUE-031: UnifiedIntelligencePipeline.executeAction reads
+                    // parameters["enable"] as? Boolean ?: true in its FLASHLIGHT /
+                    // WIFI_TOGGLE / BLUETOOTH_TOGGLE branches (ResultVerifier reads
+                    // the same key). The state was only ever written as the String
+                    // "state", so "enable" was always missing and every chat-path
+                    // toggle — including explicit OFF commands — defaulted to ON.
+                    // Write the Boolean here, at the single producer site.
+                    params["enable"] = (e.value == "ON")
+                }
                 EntityType.VOLUME_LEVEL -> params["volumeLevel"] = e.value
                 EntityType.MESSAGE_BODY -> params["message"] = e.value
                 else -> {}
