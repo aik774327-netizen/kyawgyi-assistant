@@ -87,19 +87,34 @@ class GoogleHomeCommandRouter(private val context: Context) {
                 deviceService.setBrightness(matchedDevice.deviceId, 100)
             }
 
+            // Turn Off — ISSUE-032 (Phase 1.5): evaluated BEFORE Turn
+            // On. A sentence containing both markers (e.g. a compound
+            // or negated phrasing that also contains "ဖွင့်") previously
+            // resolved ON purely because the On branch was checked
+            // first.
+            isTurnOff -> {
+                deviceService.togglePower(matchedDevice.deviceId, false)
+            }
+
             // Turn On
             isTurnOn -> {
                 deviceService.togglePower(matchedDevice.deviceId, true)
             }
 
-            // Turn Off
-            isTurnOff -> {
-                deviceService.togglePower(matchedDevice.deviceId, false)
-            }
-
             else -> {
-                // Default toggle
-                deviceService.togglePower(matchedDevice.deviceId, !matchedDevice.isOn)
+                // ISSUE-032: a device match with NO power verb is not a
+                // command — never flip the device's power just because
+                // it was mentioned. Return a no-action clarify result
+                // and leave the device state untouched.
+                SmartHomeExecutionResult(
+                    isSuccess = false,
+                    deviceId = matchedDevice.deviceId,
+                    deviceName = matchedDevice.name,
+                    actionType = "NO_ACTION",
+                    targetState = "UNCHANGED",
+                    speechFeedback = "‘${matchedDevice.name}’ ကို ဖွင့်ရမလား၊ ပိတ်ရမလား ပြောပြပေးပါခင်ဗျာ။",
+                    executionRoute = "CLARIFY"
+                )
             }
         }
     }
