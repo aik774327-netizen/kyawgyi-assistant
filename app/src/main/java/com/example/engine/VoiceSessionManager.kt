@@ -92,6 +92,21 @@ class VoiceSessionManager(
     private var speechRecognizer: SpeechRecognizer? = null
     private var isSpeechRecognizerActive = false
 
+    // FIX-01: cached verdict of the recognition-language support probe
+    // (RecognitionServiceProbe) plus in-session learning from error codes
+    // 12/13. UNKNOWN means "no evidence yet" — never a fabricated verdict.
+    @Volatile
+    private var cachedLanguageVerdict: LanguageSupportVerdict = LanguageSupportVerdict.UNKNOWN
+
+    @Volatile
+    private var cachedVerdictLanguage: String = ""
+
+    @Volatile
+    private var languageProbeInFlight = false
+
+    @Volatile
+    private var lastRequestedLanguage: String = "my-MM"
+
     // Timing & Debounce trackers
     private var sessionStartTime = 0L
     private var lastSpeechTimestamp = 0L
@@ -268,9 +283,34 @@ class VoiceSessionManager(
         }
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            // FIX-01: previously this only logged and returned, leaving the
+            // session hanging in COMMAND_LISTENING until the silence timer
+            // announced the misleading "အသံ မကြားရပါ". Surface the real
+            // problem and end the session cleanly.
             Log.w(TAG, "SpeechRecognizer is not available on this device.")
+            endSessionWithRecognizerFailure(RecognizerErrorKind.RECOGNIZER_UNAVAILABLE)
             return
         }
+
+        val selectedLang = try {
+            com.example.data.LanguagePreferencesRepository.getInstance(context).getSelectedLanguageSync()
+        } catch (e: Exception) {
+            "my-MM"
+        }
+        lastRequestedLanguage = selectedLang
+
+        // FIX-01: if a previous probe (or a previous error 12/13) proved
+        // the recognition service does not support the selected language,
+        // do not start a recognizer that can only fail silently — tell the
+        // user what is actually wrong.
+        if (cachedVerdictLanguage == selectedLang &&
+            cachedLanguageVerdict == LanguageSupportVerdict.NOT_SUPPORTED
+        ) {
+            Log.w(TAG, "Recognition service known NOT to support $selectedLang (cached verdict).")
+            endSessionWithRecognizerFailure(RecognizerErrorKind.LANGUAGE_NOT_SUPPORTED)
+            return
+        }
+        maybeProbeLanguageSupport(selectedLang)
 
         mainHandler.post {
             try {
@@ -278,11 +318,6 @@ class VoiceSessionManager(
                     speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                         setRecognitionListener(InternalRecognitionListener())
                     }
-                }
-                val selectedLang = try {
-                    com.example.data.LanguagePreferencesRepository.getInstance(context).getSelectedLanguageSync()
-                } catch (e: Exception) {
-                    "my-MM"
                 }
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -296,7 +331,58 @@ class VoiceSessionManager(
                 isSpeechRecognizerActive = true
                 Log.d(TAG, "SpeechRecognizer listening started for $selectedLang")
             } catch (e: Exception) {
+                // FIX-01: a startListening failure used to be log-only,
+                // leaving a dead session that looked like "listening".
                 Log.e(TAG, "Error starting SpeechRecognizer: ${e.localizedMessage}")
+                endSessionWithRecognizerFailure(RecognizerErrorKind.CLIENT)
+            }
+        }
+    }
+
+    /**
+     * FIX-01: fire-and-forget probe of the recognition service's
+     * supported languages. The verdict only ever *prevents* a doomed
+     * session (NOT_SUPPORTED) or stays out of the way (SUPPORTED /
+     * UNKNOWN); recognizer error codes remain the in-session backstop.
+     */
+    private fun maybeProbeLanguageSupport(language: String) {
+        if (languageProbeInFlight) return
+        if (cachedVerdictLanguage == language &&
+            cachedLanguageVerdict != LanguageSupportVerdict.UNKNOWN
+        ) return
+        languageProbeInFlight = true
+        RecognitionServiceProbe.querySupportedLanguages(context) { languages ->
+            languageProbeInFlight = false
+            val verdict = RecognitionLanguageSupport.verdictFor(languages, language)
+            cachedVerdictLanguage = language
+            cachedLanguageVerdict = verdict
+            Log.i(TAG, "Recognition language probe for $language -> $verdict")
+        }
+    }
+
+    /**
+     * FIX-01: the single honest exit for recognizer failures. Cancels all
+     * session timers (so no watchdog can later announce a contradictory
+     * message), stops the recognizer, reports the error KIND to
+     * listeners, speaks the kind's own Burmese message, and returns to
+     * wake-word mode. A failed session always ends — it never hangs in
+     * COMMAND_LISTENING pretending to listen.
+     */
+    private fun endSessionWithRecognizerFailure(kind: RecognizerErrorKind) {
+        if (RecognizerErrorMapping.isLanguageSupportError(kind)) {
+            cachedVerdictLanguage = lastRequestedLanguage
+            cachedLanguageVerdict = LanguageSupportVerdict.NOT_SUPPORTED
+        }
+        val message = RecognizerErrorMapping.userMessageMm(kind)
+        scope.launch {
+            stateMutex.withLock {
+                cancelAllTimers()
+                stopRecognizerListening()
+                notifyEvent(VoiceSessionEvent.ERROR_OCCURRED, kind.name)
+                notifyStateChanged(VoiceSessionState.ERROR, message)
+                speakFeedback(message) {
+                    startWakeWordMode()
+                }
             }
         }
     }
@@ -554,13 +640,30 @@ class VoiceSessionManager(
         }
 
         override fun onError(error: Int) {
-            Log.w(TAG, "SpeechRecognizer onError code: $error")
-            // Error 7 = ERROR_NO_MATCH, Error 8 = ERROR_RECOGNIZER_BUSY, Error 6 = ERROR_SPEECH_TIMEOUT
-            if (_currentState.value == VoiceSessionState.USER_SPEAKING) {
-                // If user had already spoken partial text, finalize with current buffer
-                if (accumulatedSpeechBuffer.isNotEmpty()) {
-                    finalizeCommandUtterance()
-                }
+            // FIX-01: errors are no longer swallowed. Before this change,
+            // any error arriving outside USER_SPEAKING (or with an empty
+            // buffer) did nothing at all — the session hung until the
+            // silence watchdog announced the generic "အသံ မကြားရပါ",
+            // whatever the real cause (including ERROR_LANGUAGE_NOT_
+            // SUPPORTED on phones whose recognizer lacks my-MM). Now the
+            // error is classified and the session always ends honestly:
+            // finalize buffered speech only for a soft end-of-speech
+            // error; otherwise report the kind's own message.
+            val kind = RecognizerErrorMapping.fromErrorCode(error)
+            Log.w(TAG, "SpeechRecognizer onError code: $error -> $kind")
+            if (RecognizerErrorMapping.isLanguageSupportError(kind)) {
+                // Learn it: the next session is stopped before it starts.
+                cachedLanguageVerdict = LanguageSupportVerdict.NOT_SUPPORTED
+            }
+            val action = RecognizerErrorMapping.decideAction(
+                kind = kind,
+                isUserSpeaking = _currentState.value == VoiceSessionState.USER_SPEAKING,
+                hasBufferedSpeech = accumulatedSpeechBuffer.isNotEmpty()
+            )
+            when (action) {
+                RecognizerErrorAction.FINALIZE_BUFFERED_SPEECH -> finalizeCommandUtterance()
+                RecognizerErrorAction.END_SESSION_WITH_MESSAGE ->
+                    endSessionWithRecognizerFailure(kind)
             }
         }
 

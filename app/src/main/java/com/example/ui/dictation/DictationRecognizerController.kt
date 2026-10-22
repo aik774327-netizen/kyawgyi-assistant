@@ -181,22 +181,38 @@ class DictationRecognizerController(
         override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 
-    private fun mapError(error: Int): DictationErrorKind = when (error) {
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> DictationErrorKind.PERMISSION_DENIED
-        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> DictationErrorKind.NETWORK
-        SpeechRecognizer.ERROR_AUDIO -> DictationErrorKind.AUDIO
-        SpeechRecognizer.ERROR_NO_MATCH -> DictationErrorKind.NO_MATCH
-        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> DictationErrorKind.SPEECH_TIMEOUT
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> DictationErrorKind.RECOGNIZER_BUSY
-        SpeechRecognizer.ERROR_SERVER -> DictationErrorKind.SERVER
-        SpeechRecognizer.ERROR_CLIENT -> DictationErrorKind.CLIENT
-        // Constants added in API 31; they are compile-time ints, so mapping
-        // them is safe on older devices (such recognizers simply never
-        // send these codes and surface language problems as SERVER errors).
-        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
-        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> DictationErrorKind.LANGUAGE_NOT_SUPPORTED
-        else -> DictationErrorKind.UNKNOWN
-    }
+    /**
+     * FIX-01: dictation's error kinds are now derived from the shared
+     * [com.example.engine.RecognizerErrorMapping] taxonomy so every voice
+     * surface in the app agrees on what a recognizer error code means.
+     * The conversion preserves this controller's historical mapping
+     * exactly (network-timeout folds into NETWORK; too-many-requests
+     * folds into SERVER; an unavailable service folds into CLIENT).
+     */
+    private fun mapError(error: Int): DictationErrorKind =
+        when (com.example.engine.RecognizerErrorMapping.fromErrorCode(error)) {
+            com.example.engine.RecognizerErrorKind.INSUFFICIENT_PERMISSIONS ->
+                DictationErrorKind.PERMISSION_DENIED
+            com.example.engine.RecognizerErrorKind.NETWORK,
+            com.example.engine.RecognizerErrorKind.NETWORK_TIMEOUT ->
+                DictationErrorKind.NETWORK
+            com.example.engine.RecognizerErrorKind.AUDIO -> DictationErrorKind.AUDIO
+            com.example.engine.RecognizerErrorKind.NO_MATCH -> DictationErrorKind.NO_MATCH
+            com.example.engine.RecognizerErrorKind.SPEECH_TIMEOUT ->
+                DictationErrorKind.SPEECH_TIMEOUT
+            com.example.engine.RecognizerErrorKind.RECOGNIZER_BUSY ->
+                DictationErrorKind.RECOGNIZER_BUSY
+            com.example.engine.RecognizerErrorKind.SERVER,
+            com.example.engine.RecognizerErrorKind.TOO_MANY_REQUESTS ->
+                DictationErrorKind.SERVER
+            com.example.engine.RecognizerErrorKind.CLIENT,
+            com.example.engine.RecognizerErrorKind.RECOGNIZER_UNAVAILABLE ->
+                DictationErrorKind.CLIENT
+            com.example.engine.RecognizerErrorKind.LANGUAGE_NOT_SUPPORTED,
+            com.example.engine.RecognizerErrorKind.LANGUAGE_UNAVAILABLE ->
+                DictationErrorKind.LANGUAGE_NOT_SUPPORTED
+            com.example.engine.RecognizerErrorKind.UNKNOWN -> DictationErrorKind.UNKNOWN
+        }
 
     companion object {
         private const val TAG = "DictationRecognizer"

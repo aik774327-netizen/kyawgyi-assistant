@@ -304,6 +304,17 @@ class KyawGyiFloatingService : Service() {
                 handler.post {
                     setMicVisualState(stateColor = "#00FF66", text = partialText)
                 }
+            },
+            onRecognitionError = { kind ->
+                // FIX-01: surface recognizer failures on the bubble
+                // instead of retrying in silence (notably when the
+                // device's recognition service lacks my-MM).
+                handler.post {
+                    setMicVisualState(
+                        stateColor = "#FF5252",
+                        text = com.example.engine.RecognizerErrorMapping.userMessageMm(kind).take(40)
+                    )
+                }
             }
         )
 

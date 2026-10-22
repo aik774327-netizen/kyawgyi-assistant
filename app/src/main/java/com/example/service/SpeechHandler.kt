@@ -21,7 +21,14 @@ class SpeechHandler(
     private val context: Context,
     private val onWakeWordDetected: () -> Unit,
     private val onCommandReceived: (String) -> Unit,
-    private val onPartialReceived: ((String) -> Unit)? = null
+    private val onPartialReceived: ((String) -> Unit)? = null,
+    /**
+     * FIX-01: invoked when the recognizer reports a failure the user must
+     * hear about — above all a language-support failure, which restarting
+     * can never fix. The owner (floating bubble) surfaces the kind's
+     * Burmese message instead of the handler retrying in silence.
+     */
+    private val onRecognitionError: ((com.example.engine.RecognizerErrorKind) -> Unit)? = null
 ) {
 
     companion object {
@@ -114,6 +121,25 @@ class SpeechHandler(
 
                         if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                             Log.e(TAG, "SpeechRecognizer stopped due to missing RECORD_AUDIO permission.")
+                            onRecognitionError?.invoke(
+                                com.example.engine.RecognizerErrorKind.INSUFFICIENT_PERMISSIONS
+                            )
+                            return
+                        }
+
+                        // FIX-01: a language-support failure (12/13) can
+                        // never be fixed by restarting the same recognizer
+                        // — the old code looped on it forever (with circuit-
+                        // breaker pauses) and never told the user anything.
+                        // Stop, and surface the honest Burmese guidance.
+                        if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                            error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                        ) {
+                            Log.e(TAG, "Recognition service does not support the selected language (error $error). Not restarting.")
+                            cancelPendingRestarts()
+                            onRecognitionError?.invoke(
+                                com.example.engine.RecognizerErrorMapping.fromErrorCode(error)
+                            )
                             return
                         }
 
@@ -293,6 +319,8 @@ class SpeechHandler(
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
             SpeechRecognizer.ERROR_SERVER -> "Server error"
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input / timeout"
+            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "Language not supported"
+            SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "Language unavailable"
             else -> "Unknown error ($errorCode)"
         }
     }
