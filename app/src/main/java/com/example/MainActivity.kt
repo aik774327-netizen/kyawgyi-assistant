@@ -311,6 +311,24 @@ fun MainAppDashboardScreen(
     var isDictationOpen by remember { mutableStateOf(false) }
     var showOneClickDiagnosticsModal by remember { mutableStateOf(false) }
 
+    // FIX-03: in-app Back behavior (previously there was no
+    // BackHandler anywhere, so system Back exited the app from every
+    // screen). Policy lives in resolveBackAction (MainBackNavigation):
+    // close an open full-screen route first, then fall back to the
+    // home tab; only at the root is Back left to the system (exit).
+    // Declared before the early returns below so it is composed while
+    // the chatbox / dictation routes are showing.
+    androidx.activity.compose.BackHandler(
+        enabled = resolveBackAction(isDictationOpen, isChatboxOpen, selectedTab) != MainBackAction.EXIT
+    ) {
+        when (resolveBackAction(isDictationOpen, isChatboxOpen, selectedTab)) {
+            MainBackAction.CLOSE_DICTATION -> isDictationOpen = false
+            MainBackAction.CLOSE_CHAT -> isChatboxOpen = false
+            MainBackAction.GO_HOME_TAB -> selectedTab = 0
+            MainBackAction.EXIT -> Unit
+        }
+    }
+
     if (isChatboxOpen) {
         com.example.ui.components.AiAngelChatboxScreen(
             viewModel = viewModel,

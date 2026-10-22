@@ -471,6 +471,28 @@ class KyawGyiAccessibilityService : AccessibilityService() {
         }, null)
     }
 
+    /**
+     * FIX-03: navigation entry point for the SmartRouter voice path
+     * (previously Back/Scroll existed only via this service's own
+     * bubble-driven command table). Returns true when the action was
+     * DISPATCHED; scroll gestures complete asynchronously, so true is
+     * a dispatch result, not visual confirmation.
+     */
+    fun performNavigationAction(action: com.example.router.NavigationAction): Boolean {
+        return when (action) {
+            com.example.router.NavigationAction.BACK ->
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            com.example.router.NavigationAction.SCROLL_UP -> {
+                performScroll(ScrollDirection.UP)
+                true
+            }
+            com.example.router.NavigationAction.SCROLL_DOWN -> {
+                performScroll(ScrollDirection.DOWN)
+                true
+            }
+        }
+    }
+
     private fun openAppByPackageOrQuery(queryOrPackage: String): Boolean {
         // 1. If it's a direct package name (e.g. contains dots)
         if (queryOrPackage.contains(".")) {

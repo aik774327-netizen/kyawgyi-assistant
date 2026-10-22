@@ -23,7 +23,8 @@ import kotlinx.coroutines.withContext
 
 class KyawGyiSmartRouter(
     private val context: Context,
-    geminiApiKey: String = BuildConfig.GEMINI_API_KEY
+    geminiApiKey: String = BuildConfig.GEMINI_API_KEY,
+    private val navigationBridge: AccessibilityNavigationBridge = AndroidAccessibilityNavigationBridge()
 ) {
 
     private val db by lazy { runCatching { KyawGyiDatabase.getDatabase(context) }.getOrNull() }
@@ -113,6 +114,31 @@ class KyawGyiSmartRouter(
                 )
             }
             return@withContext vetoResponse
+        }
+
+        // =============================================================
+        // FIX-03: NAVIGATION LAYER (Back / Scroll Up / Scroll Down).
+        // These intents previously existed ONLY in the accessibility
+        // service's bubble-driven command table, so "နောက်ဆုတ် /
+        // အောက်ရွှေ့ / အပေါ်ရွှေ့" fell through this router to the
+        // dead-end message (device evidence B1). Placed after the
+        // ISSUE-013 veto above; NavigationCommands additionally vetoes
+        // prohibitive forms of the navigation verbs themselves. When
+        // the accessibility service is off, the answer is enablement
+        // guidance — never a success claim.
+        // =============================================================
+        val navCandidate = NavigationCommands.detect(cleanQuery)
+        if (navCandidate != null) {
+            if (NavigationCommands.isNegatedNavigation(cleanQuery)) {
+                return@withContext com.example.security.MyanmarNegationGuard.NO_ACTION_RESPONSE_MM
+            }
+            return@withContext if (!navigationBridge.isAvailable()) {
+                NavigationResponses.SERVICE_UNAVAILABLE_MM
+            } else if (navigationBridge.perform(navCandidate)) {
+                NavigationResponses.dispatchedMessage(navCandidate)
+            } else {
+                NavigationResponses.DISPATCH_FAILED_MM
+            }
         }
 
         // =============================================================
