@@ -474,6 +474,33 @@ open class KyawGyiActionExecutor(val context: Context) {
         val targetQuery = appNameMM.ifBlank { packageNameOrQuery }
         val preWarning = FailureMemoryEngine.getRepeatWarningIfFailed("APP_LAUNCH", targetQuery)
 
+        // ISSUE-036: pre-execution enforcement of the Error-Learning
+        // Failed-Method Memory under the ONE canonical key. Previously this
+        // executor (and every router that calls it directly — SmartRouter,
+        // IntentRouter, Dispatcher, ActionPlanExecutor) never consulted the
+        // engine's memory at all, so ER-007's block gated nothing here.
+        // The memory is consulted WITHOUT a Context on purpose: this is a
+        // pure block check; live re-verification (which may clear a block)
+        // belongs to the pipeline guard / viewer paths (ISSUE-034/039).
+        val canonicalFailureKey = com.example.audit.FailedMethodKeys.canonical("APP_LAUNCH", targetQuery)
+        val engineWarning = com.example.audit.ErrorLearningWorkflowEngine.evaluateRequestedAction(
+            commandKey = canonicalFailureKey,
+            context = null
+        )
+        if (engineWarning != null) {
+            return CommandResult(
+                isSuccess = false,
+                action = "OPEN_APP",
+                target = targetQuery,
+                parameters = mapOf("appName" to appNameMM),
+                executionStarted = false,
+                executionConfirmed = false,
+                errorCode = "FAILED_METHOD_BLOCKED",
+                userMessage = "${engineWarning.warningBanner} ${engineWarning.simpleExplanationMm}",
+                failurePreWarning = preWarning
+            )
+        }
+
         return try {
             val pm = context.packageManager
             val universalLauncher = com.example.discovery.UniversalAppLauncher.getInstance(context)

@@ -3,6 +3,7 @@ package com.example.pipeline
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.actions.ActionRegistry
+import com.example.audit.ErrorLearningWorkflowEngine
 import com.example.pipeline.contract.RiskLevel
 import com.example.pipeline.contract.UnifiedCommandRequest
 import com.example.pipeline.memory.StructuredMemoryStore
@@ -36,6 +37,12 @@ class UnifiedIntelligencePipelineTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        // ISSUE-036: the Failed-Method Memory is now genuinely cross-command
+        // (canonical intent+target keys), so tests in this class must isolate
+        // error-learning state per method — otherwise one method's recorded
+        // failure correctly blocks a later method's rephrased retry.
+        ErrorLearningWorkflowEngine.initialize(context)
+        ErrorLearningWorkflowEngine.clearAllForTesting()
         memoryStore = StructuredMemoryStore()
         pipeline = UnifiedIntelligencePipeline(context, memoryStore)
         responseGenerator = ResponseGenerator()

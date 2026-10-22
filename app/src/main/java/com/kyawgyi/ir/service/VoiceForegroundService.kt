@@ -405,8 +405,20 @@ class VoiceForegroundService : Service() {
             return
         }
 
-        // Error-Learning AI Workflow Check: Warn if this exact action previously failed and conditions haven't changed
-        val repeatWarning = com.example.audit.ErrorLearningWorkflowEngine.evaluateRequestedAction(intent.rawQuery)
+        // Error-Learning AI Workflow Check: Warn if this action previously failed and conditions haven't changed
+        // ISSUE-036: OpenApp intents carry a structured target -> canonical key
+        // (same factory as every other path). Other intents keep their raw
+        // query as a self-consistent text key. Context is now passed (the
+        // audit found this consult previously ran without one, so the Live
+        // Condition Verifier could never run here).
+        val irFailureKey = when (intent) {
+            is VoiceIntent.OpenApp -> com.example.audit.FailedMethodKeys.canonical("OPEN_APP", intent.appTarget)
+            else -> intent.rawQuery
+        }
+        val repeatWarning = com.example.audit.ErrorLearningWorkflowEngine.evaluateRequestedAction(
+            commandKey = irFailureKey,
+            context = this
+        )
         if (repeatWarning != null) {
             Log.w(TAG, "Blocked repeat of previously failed action in VoiceForegroundService: ${repeatWarning.warningBanner}")
             updateNotification(repeatWarning.simpleExplanationMm)

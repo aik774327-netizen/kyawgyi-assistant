@@ -153,9 +153,15 @@ class HybridPipelineController(
         val parsedIntent = intentParser.parse(preprocessedText)
         Log.i(TAG, "Parsed Local Intent: ${parsedIntent.intentName} (Confidence: ${parsedIntent.confidence})")
 
-        // 4. Error-Learning AI Workflow Check: Warn if this exact action previously failed and conditions haven't changed
+        // 4. Error-Learning AI Workflow Check: Warn if this action previously failed and conditions haven't changed
+        // ISSUE-036: canonical key from intent + target slot (same factory as
+        // every other path), not the path-local preprocessed-text namespace.
+        val hybridFailureKey = com.example.audit.FailedMethodKeys.canonical(
+            parsedIntent.intentName,
+            parsedIntent.slots["target"] ?: parsedIntent.slots["app"] ?: preprocessedText
+        )
         val repeatWarning = com.example.audit.ErrorLearningWorkflowEngine.evaluateRequestedAction(
-            commandKey = preprocessedText,
+            commandKey = hybridFailureKey,
             context = context
         )
         if (repeatWarning != null) {
@@ -174,7 +180,10 @@ class HybridPipelineController(
         if (!actionResult.isSuccess) {
             val errorEntry = com.example.audit.ErrorLearningWorkflowEngine.recordErrorLog(
                 task = "Execute voice command: '$preprocessedText' (${parsedIntent.intentName})",
-                commandKey = preprocessedText,
+                commandKey = com.example.audit.FailedMethodKeys.canonical(
+                    parsedIntent.intentName,
+                    actionResult.target ?: preprocessedText
+                ),
                 expectedResult = "Action '${actionResult.action}' on target '${actionResult.target}' completes with isSuccess = true",
                 actualResult = "Execution failed with message: ${actionResult.userMessage}",
                 attemptedMethod = "${parsedIntent.intentName} via KyawGyiActionExecutor (${actionResult.action})",

@@ -173,7 +173,9 @@ object FailureMemoryEngine {
         try {
             com.example.audit.ErrorLearningWorkflowEngine.recordErrorLog(
                 task = "$component -> $operation",
-                commandKey = "${component}_${operation}",
+                // ISSUE-036: canonical key from the ONE factory, not a local
+                // "${component}_${operation}" namespace.
+                commandKey = com.example.audit.FailedMethodKeys.canonical(component, operation),
                 expectedResult = "$operation အောင်မြင်စွာ လုပ်ဆောင်နိုင်ရန်",
                 actualResult = rootCauseMm,
                 attemptedMethod = "$component.$operation",

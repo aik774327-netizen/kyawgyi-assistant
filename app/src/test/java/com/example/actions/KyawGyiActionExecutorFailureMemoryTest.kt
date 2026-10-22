@@ -2,9 +2,11 @@ package com.example.actions
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.audit.ErrorLearningWorkflowEngine
 import com.example.data.FailureCategory
 import com.example.ocr.FailureMemoryEngine
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -28,6 +30,10 @@ class KyawGyiActionExecutorFailureMemoryTest {
             FailureMemoryEngine.clearAllPersistently(context)
         }
         FailureMemoryEngine.initialize(context)
+        // ISSUE-036: FailureMemoryEngine records now also land in the unified
+        // Error-Learning memory; isolate it per method as well.
+        ErrorLearningWorkflowEngine.initialize(context)
+        ErrorLearningWorkflowEngine.clearAllForTesting()
     }
 
     @Test
@@ -84,6 +90,13 @@ class KyawGyiActionExecutorFailureMemoryTest {
         assertNotNull(result.failurePreWarning)
         assertTrue(result.failurePreWarning!!.contains("ယခင်က မအောင်မြင်ခဲ့သော လုပ်ဆောင်ချက် ဖြစ်ပါသည်"))
         assertTrue(result.userMessage.contains("ယခင်က မအောင်မြင်ခဲ့သော လုပ်ဆောင်ချက် ဖြစ်ပါသည်"))
-        assertTrue(result.userMessage.contains("အရင်းအမြစ်/စက်ပိုင်းဆိုင်ရာ မလုံလောက်မှု"))
+        // ISSUE-036 contract change: openApplication now ENFORCES the unified
+        // Failed-Method Memory before executing (previously it only prepended
+        // a warning and attempted the launch anyway — the display-only block
+        // the audit flagged). The recorded failure therefore blocks the retry
+        // outright with the mandatory warning banner.
+        assertTrue(!result.isSuccess)
+        assertTrue(!result.executionStarted)
+        assertEquals("FAILED_METHOD_BLOCKED", result.errorCode)
     }
 }

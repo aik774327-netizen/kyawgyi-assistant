@@ -477,10 +477,15 @@ object ErrorLearningWorkflowEngine {
                     val obj = arr.optJSONObject(i) ?: continue
                     val entry = ErrorLogEntry.fromJsonObject(obj)
                     errorLogHistory.add(entry)
-                    if (activeBlockedKeys.contains(entry.commandKey) &&
+                    // ISSUE-036 legacy migration (read-time, non-destructive):
+                    // entries recorded by older builds keep their stored key in
+                    // history, but the memory index uses the canonical form so
+                    // canonical lookups find them.
+                    val canonicalKey = FailedMethodKeys.canonicalOrSelf(entry.commandKey)
+                    if ((activeBlockedKeys.contains(entry.commandKey) || activeBlockedKeys.contains(canonicalKey)) &&
                         (entry.status == ErrorLifecycleStatus.BLOCKED || entry.status == ErrorLifecycleStatus.FAILED)
                     ) {
-                        failedMethodMemory[entry.commandKey] = entry
+                        failedMethodMemory[canonicalKey] = entry
                     }
                 }
             }
@@ -540,7 +545,9 @@ object ErrorLearningWorkflowEngine {
     ): ErrorLogEntry {
         val now = System.currentTimeMillis()
         val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(now))
-        val normKey = normalizeKey(commandKey)
+        // ISSUE-036: every record is stored under the ONE canonical key
+        // (structured/legacy keys canonicalize; free-text keys normalize).
+        val normKey = FailedMethodKeys.canonicalOrSelf(commandKey)
 
         // Item 19: Redact sensitive PII before logging
         val safeTask = SensitiveDataRedactor.redactForAuditLog(task)
@@ -666,7 +673,7 @@ object ErrorLearningWorkflowEngine {
         commandKey: String,
         context: Context? = appContext
     ): FailedMethodWarning? {
-        val key = normalizeKey(commandKey)
+        val key = FailedMethodKeys.canonicalOrSelf(commandKey)
         val previousLog = failedMethodMemory[key] ?: return null
 
         if (context != null) {
@@ -820,7 +827,7 @@ object ErrorLearningWorkflowEngine {
         commandKey: String,
         context: Context? = appContext
     ): VerificationResult {
-        val key = normalizeKey(commandKey)
+        val key = FailedMethodKeys.canonicalOrSelf(commandKey)
         val previousLog = failedMethodMemory[key]
             ?: return VerificationResult(
                 outcome = VerificationOutcome.UNVERIFIED,
@@ -863,7 +870,7 @@ object ErrorLearningWorkflowEngine {
      */
     @Synchronized
     fun verificationFromExecutionSuccess(commandKey: String, detail: String): VerificationResult? {
-        val key = normalizeKey(commandKey)
+        val key = FailedMethodKeys.canonicalOrSelf(commandKey)
         val blocked = failedMethodMemory[key] ?: return null
         return VerificationResult(
             outcome = VerificationOutcome.VERIFIED,
@@ -888,7 +895,7 @@ object ErrorLearningWorkflowEngine {
     @Synchronized
     fun clearFailedMethodWithVerification(result: VerificationResult): Boolean {
         if (result.outcome != VerificationOutcome.VERIFIED) return false
-        val key = normalizeKey(result.commandKey)
+        val key = FailedMethodKeys.canonicalOrSelf(result.commandKey)
         val blocked = failedMethodMemory[key] ?: return false
         if (blocked.errorId != result.errorId) {
             Log.w(TAG, "Refused to clear '$key': verification is bound to ${result.errorId}, blocked record is ${blocked.errorId}")

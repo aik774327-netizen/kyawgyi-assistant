@@ -390,8 +390,17 @@ class UnifiedIntelligencePipeline(
         // -------------------------------------------------------------
         // Step 6.5: Error-Learning Failed-Method Memory & Live Condition Verifier Guard
         // -------------------------------------------------------------
+        // ISSUE-036: the guard, the failure record (Step 10) and the
+        // success-clear all use the ONE canonical key derived from
+        // intent + target — never the raw transcript — so a block minted by
+        // an executor (e.g. ER-007's app_launch namespace) gates this path,
+        // and rephrasings of the same command hit the same key.
+        val failureKey = com.example.audit.FailedMethodKeys.canonical(
+            registryActionType,
+            finalTarget ?: cleanedText
+        )
         val errorLearningWarning = com.example.audit.ErrorLearningWorkflowEngine.evaluateRequestedAction(
-            commandKey = cleanedText,
+            commandKey = failureKey,
             context = context
         )
         if (errorLearningWarning != null) {
@@ -580,7 +589,7 @@ class UnifiedIntelligencePipeline(
             )
             com.example.audit.ErrorLearningWorkflowEngine.recordErrorLog(
                 task = "$registryActionType (${finalTarget ?: cleanedText})",
-                commandKey = cleanedText,
+                commandKey = failureKey,
                 expectedResult = "$registryActionType အောင်မြင်စွာ ဆောင်ရွက်ရန်",
                 actualResult = verifiedResult.reason ?: "Action verification failed",
                 attemptedMethod = "UnifiedIntelligencePipeline.executeAction($registryActionType, target=$finalTarget)",
@@ -592,7 +601,7 @@ class UnifiedIntelligencePipeline(
             // ISSUE-034: a verified successful execution clears a blocked record
             // only through a typed VerificationResult bound to that record.
             val successVerification = com.example.audit.ErrorLearningWorkflowEngine.verificationFromExecutionSuccess(
-                commandKey = cleanedText,
+                commandKey = failureKey,
                 detail = "Verified execution succeeded for $registryActionType on ${finalTarget ?: "system"}"
             )
             if (successVerification != null) {
