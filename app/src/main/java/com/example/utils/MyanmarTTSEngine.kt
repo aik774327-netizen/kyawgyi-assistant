@@ -166,9 +166,6 @@ class MyanmarTTSEngine(
         private set
     var isEnabled: Boolean = true
 
-    // Universal Burmese Phonetic G2P Fallback when native my-MM voice pack is not downloaded
-    var isPhoneticG2PFallbackEnabled: Boolean = true
-
     // Real State Tracking: Detects if Myanmar voice data is actually installed on device TTS engine
     var isMyanmarVoiceDataMissing: Boolean = false
         private set
@@ -206,6 +203,16 @@ class MyanmarTTSEngine(
         val packStatus = voicePackManager.updateTtsInstance(tts, status)
 
         if (status == TextToSpeech.SUCCESS) {
+            // FIX-02: bind the audit's selected installed Myanmar voice
+            // explicitly, instead of relying on engine locale defaults.
+            voicePackManager.selectedMyanmarVoice()?.let { chosenVoice ->
+                try {
+                    tts?.voice = chosenVoice
+                    Log.i(TAG, "Applied selected Myanmar TTS voice: ${chosenVoice.name}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not apply selected Myanmar voice: ${e.message}")
+                }
+            }
             val prefRepo = com.example.data.LanguagePreferencesRepository.getInstance(context)
             val preferredLocale = prefRepo.getSelectedLocaleSync()
             var result = tts?.setLanguage(preferredLocale)
@@ -310,31 +317,36 @@ class MyanmarTTSEngine(
             return
         }
 
-        // Safety Gate & Universal Phonetic G2P Fallback:
-        // When native my-MM voice pack is missing on com.google.android.tts, automatically transliterate
-        // Burmese Unicode into speakable phonetic syllables so speech always succeeds without blocking!
+        // FIX-02 (device defect B2 — robotic Burmese voice): the old
+        // "Universal Phonetic G2P Fallback" transliterated Burmese into
+        // Latin phonetics and read it with a US English voice whenever
+        // the my-MM voice data was missing. That is exactly the robotic
+        // voice the user reported, and it dishonestly presented itself
+        // as a Burmese reply. It is REMOVED. When no installed Myanmar
+        // voice exists, the user now hears one honest English notice
+        // (plus the recovery Toast/event with install guidance) — the
+        // Burmese text itself is never fed to a foreign voice.
         val voicePackManager = MyanmarTTSVoicePackManager.getInstance(context)
-        if (com.example.ocr.MyanmarScriptDetector.containsMyanmar(cleanText) && !voicePackManager.canSafelyVocalizeMyanmar()) {
-            if (isPhoneticG2PFallbackEnabled && isReady && tts != null) {
-                val phoneticText = transliterateBurmeseToSpeakablePhonetics(cleanText)
-                if (phoneticText.isNotBlank()) {
-                    Log.i(TAG, "Native my-MM pack unavailable; vocalizing via Universal Burmese Phonetic G2P Fallback: $phoneticText")
+        if (com.example.ocr.MyanmarScriptDetector.containsMyanmar(cleanText)) {
+            val decision = BurmeseSpeechPolicy.decide(
+                containsMyanmar = true,
+                voiceChoice = voicePackManager.currentMyanmarVoiceChoice()
+            )
+            if (decision == BurmeseSpeechDecision.HONEST_NOTICE_NO_MYANMAR_VOICE) {
+                if (isReady && tts != null) {
+                    // UI surfacing + failure record (no completion
+                    // callback here — the notice utterance carries it).
+                    voicePackManager.handleMissingVoicePackFailure(context, cleanText, null)
                     tts?.language = Locale.US
-                    // The phonetic-G2P fallback path executed for this
-                    // utterance. That does NOT verify that any previously
-                    // blocked TTS method's conditions changed, so no
-                    // "verified evidence" resolution is recorded here
-                    // (FAKE-10, 2026-10-22).
-                    Log.i(TAG, "Phonetic G2P fallback used for utterance; no voice-pack verification is claimed.")
-                    queue.add(Pair(phoneticText, onEndCallback))
+                    queue.add(Pair(BurmeseSpeechPolicy.ENGLISH_NOTICE, onEndCallback))
                     if (!isSpeaking) {
                         processQueue()
                     }
-                    return
+                } else {
+                    voicePackManager.handleMissingVoicePackFailure(context, cleanText, onEndCallback)
                 }
+                return
             }
-            voicePackManager.handleMissingVoicePackFailure(context, cleanText, onEndCallback)
-            return
         }
 
         queue.add(Pair(cleanText, onEndCallback))

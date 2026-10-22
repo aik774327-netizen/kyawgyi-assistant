@@ -229,14 +229,23 @@ class VoiceEngine(
             stopListeningInternal()
         }
 
-        // Universal Burmese Phonetic G2P Fallback when native my-MM voice pack is missing
+        // FIX-02 (device defect B2 — robotic Burmese voice): this path
+        // used the same phonetic-G2P fallback as MyanmarTTSEngine —
+        // Burmese transliterated to Latin and read by a US voice. It is
+        // replaced by the shared honest policy: with no installed
+        // Myanmar voice, speak ONE English notice (and surface the
+        // recovery guidance) instead of fake-Burmese phonetics.
         val voicePackManager = com.example.utils.MyanmarTTSVoicePackManager.getInstance(context)
+        val speechDecision = com.example.utils.BurmeseSpeechPolicy.decide(
+            containsMyanmar = com.example.ocr.MyanmarScriptDetector.containsMyanmar(normalizedSpeechText),
+            voiceChoice = voicePackManager.currentMyanmarVoiceChoice()
+        )
         val finalSpeechPayload = if (
-            com.example.ocr.MyanmarScriptDetector.containsMyanmar(normalizedSpeechText) &&
-            !voicePackManager.canSafelyVocalizeMyanmar()
+            speechDecision == com.example.utils.BurmeseSpeechDecision.HONEST_NOTICE_NO_MYANMAR_VOICE
         ) {
+            voicePackManager.handleMissingVoicePackFailure(context, normalizedSpeechText, null)
             tts?.language = Locale.US
-            com.example.utils.MyanmarTTSEngine.transliterateBurmeseToSpeakablePhonetics(normalizedSpeechText)
+            com.example.utils.BurmeseSpeechPolicy.ENGLISH_NOTICE
         } else {
             normalizedSpeechText
         }

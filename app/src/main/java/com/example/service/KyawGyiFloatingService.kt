@@ -288,10 +288,17 @@ class KyawGyiFloatingService : Service() {
                         KyawGyiVoiceSession.readScreenContentAloud(this@KyawGyiFloatingService) { spokenMsg ->
                             setMicVisualState(stateColor = "#00FF66", text = spokenMsg.take(30))
                         }
-                    } else if (spokenText.contains("ပိတ်") || spokenText.contains("ထွက်")) {
-                        ttsEngine?.speak("အက်ပ်ကို ပိတ်လိုက်ပါပြီခင်ဗျာ")
-                    } else if (spokenText.contains("ဖွင့်")) {
-                        ttsEngine?.speak("အက်ပ် ဖွင့်ပေးလိုက်ပါပြီခင်ဗျာ")
+                    } else {
+                        // FIX-02: speech is derived from the ACTUAL
+                        // execution result via FloatingFeedbackSpeech.
+                        // The previous branches announced success
+                        // ("ဖွင့်ပေးလိုက်ပါပြီ" / "ပိတ်လိုက်ပါပြီ") purely
+                        // because the user's sentence contained
+                        // "ဖွင့်"/"ပိတ်" — even when nothing executed
+                        // and even for vetoed negations.
+                        FloatingFeedbackSpeech.speechFor(spokenText, result)?.let { speech ->
+                            ttsEngine?.speak(speech)
+                        }
                     }
 
                     handler.removeCallbacksAndMessages(null)

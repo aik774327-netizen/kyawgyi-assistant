@@ -134,6 +134,76 @@ class MyanmarTTSVoicePackManager private constructor(private val appContext: Con
         }
     }
 
+    @Volatile
+    private var selectedMyanmarVoice: android.speech.tts.Voice? = null
+
+    /** The installed Myanmar voice chosen by the latest [auditVoices], if any. */
+    fun selectedMyanmarVoice(): android.speech.tts.Voice? = selectedMyanmarVoice
+
+    /**
+     * FIX-02: enumerates the engine's voices and selects an actually
+     * INSTALLED Myanmar voice via [MyanmarVoiceSelector]. A voice whose
+     * data is only downloadable (KEY_FEATURE_NOT_INSTALLED) does not
+     * count as usable. The two definitive outcomes are published to
+     * [voicePackStatus] immediately; NO_MYANMAR_VOICE leaves the status
+     * to the caller's locale-availability evaluation, because some
+     * engines report an empty voice list while still answering
+     * isLanguageAvailable correctly.
+     */
+    fun auditVoices(tts: TextToSpeech): MyanmarVoiceSelection {
+        val voiceSet = try {
+            tts.voices
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not enumerate TTS voices: ${e.message}")
+            null
+        }
+        if (voiceSet.isNullOrEmpty()) {
+            selectedMyanmarVoice = null
+            return MyanmarVoiceSelection(MyanmarVoiceChoice.NO_MYANMAR_VOICE, -1)
+        }
+        val voiceList = voiceSet.toList()
+        val candidates = voiceList.map { voice ->
+            TtsVoiceCandidate(
+                localeTag = try {
+                    voice.locale?.toLanguageTag() ?: ""
+                } catch (e: Exception) {
+                    ""
+                },
+                name = voice.name ?: "",
+                dataInstalled = !(
+                    voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) ?: false
+                    )
+            )
+        }
+        val selection = MyanmarVoiceSelector.select(candidates)
+        selectedMyanmarVoice = if (
+            selection.choice == MyanmarVoiceChoice.INSTALLED_VOICE &&
+            selection.selectedIndex in voiceList.indices
+        ) {
+            voiceList[selection.selectedIndex]
+        } else {
+            null
+        }
+        when (selection.choice) {
+            MyanmarVoiceChoice.INSTALLED_VOICE -> _voicePackStatus.value = VoicePackStatus.VOICE_PACK_INSTALLED
+            MyanmarVoiceChoice.VOICE_DATA_MISSING -> _voicePackStatus.value = VoicePackStatus.VOICE_PACK_MISSING_DATA
+            MyanmarVoiceChoice.NO_MYANMAR_VOICE -> {
+                // Enumeration worked and contains no Myanmar voice at all:
+                // this engine genuinely cannot speak Burmese.
+                _voicePackStatus.value = VoicePackStatus.ENGINE_UNSUPPORTED
+            }
+        }
+        Log.i(TAG, "TTS voice audit: choice=${selection.choice}, selected=${selectedMyanmarVoice?.name}")
+        return selection
+    }
+
+    /** The current Myanmar-voice situation in [BurmeseSpeechPolicy] terms. */
+    fun currentMyanmarVoiceChoice(): MyanmarVoiceChoice = when (_voicePackStatus.value) {
+        VoicePackStatus.VOICE_PACK_INSTALLED -> MyanmarVoiceChoice.INSTALLED_VOICE
+        VoicePackStatus.VOICE_PACK_MISSING_DATA -> MyanmarVoiceChoice.VOICE_DATA_MISSING
+        else -> MyanmarVoiceChoice.NO_MYANMAR_VOICE
+    }
+
     /**
      * Updates and audits current TextToSpeech instance state.
      */
@@ -153,6 +223,36 @@ class MyanmarTTSVoicePackManager private constructor(private val appContext: Con
 
         val engine = tts.defaultEngine ?: ""
         val enginesList = tts.engines?.map { it.name } ?: emptyList()
+
+        // FIX-02: voice enumeration is the primary evidence. An
+        // installed Myanmar voice (or Myanmar voices whose data is
+        // missing) settles the status here; locale availability below
+        // remains the fallback for engines that report no voice list.
+        val enumerationEmpty = try {
+            tts.voices.isNullOrEmpty()
+        } catch (e: Exception) {
+            true
+        }
+        val audit = auditVoices(tts)
+        when (audit.choice) {
+            MyanmarVoiceChoice.INSTALLED_VOICE -> {
+                _currentEnginePackage.value = engine
+                _availableEngines.value = enginesList
+                return VoicePackStatus.VOICE_PACK_INSTALLED
+            }
+            MyanmarVoiceChoice.VOICE_DATA_MISSING -> {
+                _currentEnginePackage.value = engine
+                _availableEngines.value = enginesList
+                return VoicePackStatus.VOICE_PACK_MISSING_DATA
+            }
+            MyanmarVoiceChoice.NO_MYANMAR_VOICE -> {
+                if (!enumerationEmpty) {
+                    _currentEnginePackage.value = engine
+                    _availableEngines.value = enginesList
+                    return VoicePackStatus.ENGINE_UNSUPPORTED
+                }
+            }
+        }
 
         // Check language availability for Burmese
         var langResult = tts.isLanguageAvailable(BURMESE_LOCALE)
