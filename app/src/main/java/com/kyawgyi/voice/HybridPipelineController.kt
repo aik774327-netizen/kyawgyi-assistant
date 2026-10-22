@@ -131,6 +131,21 @@ class HybridPipelineController(
         val preprocessedText = BurmeseNluPreprocessor.normalize(effectiveInput)
         Log.d(TAG, "Layer 6 Preprocessed: \"$rawUtterance\" -> \"$preprocessedText\"")
 
+        // ISSUE-013 NEGATION VETO (Phase 1.5): a prohibitive negation
+        // must never reach the intent parser or executor below.
+        // (Replies to a pending gatekeeper action were already resolved
+        // at step 1 — the gatekeeper owns cancellation matching for
+        // staged actions — so this veto only sees fresh commands.)
+        val negationResult = com.example.security.MyanmarNegationGuard.detectProhibitiveNegation(preprocessedText)
+        if (negationResult is com.example.security.MyanmarNegationGuard.NegationResult.Negated) {
+            Log.i(TAG, "Prohibitive negation vetoed (ISSUE-013); marker=${negationResult.matchedMarker}")
+            stateStore.transitionTo(AssistantState.SPEAKING)
+            ttsClient.synthesizeAndPlay(com.example.security.MyanmarNegationGuard.NO_ACTION_RESPONSE_MM) {
+                stateStore.resetToIdle()
+            }
+            return@withContext
+        }
+
         // Transition FSM to THINKING
         stateStore.transitionTo(AssistantState.THINKING)
 

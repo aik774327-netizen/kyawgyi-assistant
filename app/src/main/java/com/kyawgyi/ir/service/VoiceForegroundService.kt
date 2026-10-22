@@ -386,6 +386,25 @@ class VoiceForegroundService : Service() {
     private fun handleVoiceIntent(intent: VoiceIntent) {
         Log.i(TAG, "Handling voice intent in service: $intent")
 
+        // ISSUE-013 NEGATION VETO (Phase 1.5): a prohibitive negation
+        // ("မဖွင့်ပါနဲ့ Facebook", "ဝိုင်ဖိုင် မဖွင့်ပါနဲ့") must not
+        // execute, even though the regex parser above already turned it
+        // into an action intent. Confirmation/cancellation replies and
+        // the wake word are exempt: they resolve an already-staged
+        // action (a negated reply is exactly how a staged call gets
+        // cancelled) or carry no action at all.
+        if (intent !is VoiceIntent.ConfirmAction &&
+            intent !is VoiceIntent.CancelAction &&
+            intent !is VoiceIntent.WakeWordDetected &&
+            com.example.security.MyanmarNegationGuard.isNegated(intent.rawQuery)
+        ) {
+            val vetoResponse = com.example.security.MyanmarNegationGuard.NO_ACTION_RESPONSE_MM
+            Log.i(TAG, "Prohibitive negation vetoed in VoiceForegroundService (ISSUE-013): '${intent.rawQuery}'")
+            updateNotification(vetoResponse)
+            voiceEngine?.speak(vetoResponse)
+            return
+        }
+
         // Error-Learning AI Workflow Check: Warn if this exact action previously failed and conditions haven't changed
         val repeatWarning = com.example.audit.ErrorLearningWorkflowEngine.evaluateRequestedAction(intent.rawQuery)
         if (repeatWarning != null) {

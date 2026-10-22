@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.actions.KyawGyiActionExecutor
 import com.example.data.local.KyawGyiDatabase
 import com.example.data.local.entity.ConversationEntity
+import com.example.security.MyanmarNegationGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -104,6 +105,15 @@ class KyawGyiDispatcher(private val context: Context) {
      */
     suspend fun tryExecuteCommand(spokenText: String): CommandRouteResult =
         withContext(Dispatchers.IO) {
+            // ISSUE-013 NEGATION VETO (Phase 1.5): this is the dictation
+            // funnel — a segment containing a prohibitive negation
+            // ("မဖွင့်ပါနဲ့ …") is dictated text, not a command. It is
+            // NOT executed and NOT an error: NotHandled makes the
+            // caller file it as document text, per the plan's dictation
+            // semantics.
+            if (MyanmarNegationGuard.isNegated(spokenText)) {
+                return@withContext CommandRouteResult.NotHandled
+            }
             val outcome = executeCommandCore(spokenText)
             if (outcome.handled) {
                 logHistory(spokenText, outcome)

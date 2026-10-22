@@ -81,6 +81,41 @@ class KyawGyiSmartRouter(
         }
 
         // =============================================================
+        // ISSUE-013 NEGATION VETO (Phase 1.5): a prohibitive negation
+        // ("မဖွင့်ပါနဲ့ Facebook") must never reach any matching or
+        // fuzzy layer below. Placed after the pending-confirmation
+        // block above so a negated reply to a staged call/SMS still
+        // resolves (cancels) that staged action first; placed before
+        // Layer 1 so no execution path — Google Home, URL fuzzy 0.65,
+        // shortcuts, IntentRouter, semantic, app dictionary — can act
+        // on a negated command.
+        // =============================================================
+        val negationResult = com.example.security.MyanmarNegationGuard.detectProhibitiveNegation(cleanQuery)
+        if (negationResult is com.example.security.MyanmarNegationGuard.NegationResult.Negated) {
+            val vetoResponse = com.example.security.MyanmarNegationGuard.NO_ACTION_RESPONSE_MM
+            AuditLogger.log(
+                rawQuery = spokenText,
+                normalizedQuery = normalizedQuery,
+                resolutionPath = ResolutionPath.BLOCKED_BY_RISK_POLICY,
+                targetAction = "NEGATION_VETO",
+                confidence = 1.0f,
+                isSuccess = false,
+                details = "Prohibitive negation vetoed before any matching layer (ISSUE-013); marker=${negationResult.matchedMarker}",
+                executionTimeMs = System.currentTimeMillis() - startTime
+            )
+            runCatching {
+                db?.conversationDao()?.insertConversation(
+                    ConversationEntity(
+                        userQuery = spokenText,
+                        assistantResponse = vetoResponse,
+                        executionMode = "NEGATION_VETO"
+                    )
+                )
+            }
+            return@withContext vetoResponse
+        }
+
+        // =============================================================
         // LAYER 1: FAST-PATH PATTERN MATCH (Google Home, URL controls, Custom shortcuts, Hardware & System Actions, Dynamic App Launcher)
         // =============================================================
         val smartHomeResult = googleHomeRouter.routeVoiceCommand(spokenText)

@@ -144,6 +144,23 @@ class UnifiedIntelligencePipeline(
             latencyMs = System.currentTimeMillis() - normStart
         )
 
+        // ISSUE-013 NEGATION VETO (Phase 1.5): a prohibitive negation
+        // ("YouTube မဖွင့်ပါနဲ့") must not be semantically resolved
+        // into an action. Return the same non-executing fallback shape
+        // used for blocked input, carrying the honest no-action
+        // response — nothing is executed and nothing claims success.
+        val negationResult = com.example.security.MyanmarNegationGuard.detectProhibitiveNegation(cleanedText)
+        if (negationResult is com.example.security.MyanmarNegationGuard.NegationResult.Negated) {
+            val vetoResponse = com.example.security.MyanmarNegationGuard.NO_ACTION_RESPONSE_MM
+            if (speakResponse) ttsEngine.speak(vetoResponse)
+            return@withContext createFallbackResponse(
+                request = request,
+                reason = "Prohibitive negation vetoed (ISSUE-013); marker=${negationResult.matchedMarker}",
+                responseMM = vetoResponse,
+                startTime = startTime
+            )
+        }
+
         // Check for Previous Failure History (အမှားမှသင်ယူနိုင်သော AI စနစ် - အချက် ၂)
         val previousFailureWarning = com.example.audit.CommandFailureAnalyzer.checkPreviousFailure(context, cleanedText)
 

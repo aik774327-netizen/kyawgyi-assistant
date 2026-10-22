@@ -32,6 +32,8 @@ data class ParsedCommand(
     val direction: ScrollDirection? = null,
     val isWake: Boolean = false,
     val isStop: Boolean = false,
+    /** ISSUE-013: true when the input is a prohibitive negation ("မပိတ်ပါနဲ့") — never an executable command. */
+    val isNegated: Boolean = false,
     val raw: String = ""
 )
 
@@ -180,6 +182,15 @@ object MyanmarCommands {
         val stripped = text.trim()
         if (stripped.isEmpty()) return null
 
+        // ISSUE-013 / ISSUE-028 (Phase 1.5): a prohibitive negation is
+        // not a command at all. This veto runs before everything below,
+        // including the STOP-word check: "မပိတ်ပါနဲ့" contains the STOP
+        // word "ပိတ်ပါ" and previously resolved to LOCK_SCREEN — a
+        // "don't close" utterance locked the device screen.
+        if (com.example.security.MyanmarNegationGuard.isNegated(stripped)) {
+            return ParsedCommand(isNegated = true, raw = stripped)
+        }
+
         val hasWake = WAKE_WORDS.any { stripped.contains(it) }
         val remainder = if (hasWake) {
             WAKE_WORDS.fold(stripped) { acc, w -> acc.replace(w, "") }.trim()
@@ -291,6 +302,11 @@ object MyanmarCommands {
     ): Pair<MyanmarCommandType, String> {
         val parsed = parse(text)
         if (parsed != null) {
+            if (parsed.isNegated) {
+                // ISSUE-013: vetoed — no action outcome on this path
+                // (consumers treat UNKNOWN as "no action").
+                return Pair(MyanmarCommandType.UNKNOWN, parsed.raw)
+            }
             if (parsed.isStop) {
                 return Pair(MyanmarCommandType.LOCK_SCREEN, "STOP")
             }

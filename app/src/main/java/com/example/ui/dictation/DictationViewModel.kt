@@ -237,6 +237,24 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             _finalTranscripts.emit(segment)
             return
         }
+        // ISSUE-013 (Phase 1.5): a segment containing a prohibitive
+        // negation is dictated text, not a command — the user may be
+        // writing a sentence like "မဖွင့်ပါနဲ့". Never offer it to the
+        // command pipeline; insert it as document text and say why.
+        // (The dispatcher applies the same veto as a second line of
+        // defence, so no caller of tryExecuteCommand can execute a
+        // negated segment either.)
+        if (com.example.security.MyanmarNegationGuard.isNegated(segment.text)) {
+            _finalTranscripts.emit(segment)
+            _uiState.update {
+                it.copy(
+                    statusMessage = "ငြင်းဆိုချက် ပါဝင်သော စာသားမို့ အမိန့်အဖြစ် မလုပ်ဆောင်ဘဲ စာသားအဖြစ် ထည့်လိုက်ပါပြီ",
+                    statusKind = DictationStatusKind.IDLE,
+                    guidanceMessage = null
+                )
+            }
+            return
+        }
         var handledResponse: String? = null
         val checkResult = try {
             when (val result = commandDispatcher.tryExecuteCommand(segment.text)) {
