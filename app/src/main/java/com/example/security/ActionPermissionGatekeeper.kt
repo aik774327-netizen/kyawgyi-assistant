@@ -245,18 +245,26 @@ class ActionPermissionGatekeeper(
         val clean = transcript.trim().lowercase()
         val deferred = activeDeferred ?: return false
 
-        // Check affirmative confirmation ("အတည်ပြုပါတယ်", "လုပ်ပါ", etc.)
-        val isAffirmative = AFFIRMATIVE_KEYWORDS.any { clean == it || clean.contains(it) }
-        if (isAffirmative) {
-            Log.i(TAG, "Voice input matched affirmative confirmation: [$clean]")
-            return deferred.complete(true)
-        }
-
+        // ISSUE-015: cancellation is checked BEFORE affirmative.
+        // Every Burmese prohibitive cancellation of the form "မ<verb>ပါနဲ့"
+        // contains the affirmative keyword "<verb>ပါ" as a substring
+        // ("ခေါ်ပါ" ⊂ "မခေါ်ပါနဲ့", "ပို့ပါ" ⊂ "မပို့ပါနဲ့", "လုပ်ပါ" ⊂ "မလုပ်ပါနဲ့"),
+        // so affirmative-first substring matching resolved an explicit
+        // cancellation as a CONFIRMATION and executed the staged action.
+        // Cancellation takes precedence — the same rule ISSUE-029 applied
+        // to CallSmsConfirmationCoordinator.
         // Check negative cancellation ("မလုပ်နဲ့", "မခေါ်ပါနဲ့", etc.)
         val isCancellation = CANCELLATION_KEYWORDS.any { clean == it || clean.contains(it) }
         if (isCancellation) {
             Log.i(TAG, "Voice input matched cancellation: [$clean]")
             return deferred.complete(false)
+        }
+
+        // Check affirmative confirmation ("အတည်ပြုပါတယ်", "လုပ်ပါ", etc.)
+        val isAffirmative = AFFIRMATIVE_KEYWORDS.any { clean == it || clean.contains(it) }
+        if (isAffirmative) {
+            Log.i(TAG, "Voice input matched affirmative confirmation: [$clean]")
+            return deferred.complete(true)
         }
 
         Log.d(TAG, "Voice input did not resolve safety confirmation: [$clean]")
