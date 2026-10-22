@@ -57,6 +57,26 @@ object ErrorLearningWorkflowEngine {
     const val MANDATORY_WARNING_PREFIX = "This is a previously unsuccessful action."
     const val MANDATORY_WARNING_PREFIX_MM = "ယခင်က မအောင်မြင်ခဲ့သော လုပ်ဆောင်ချက် ဖြစ်ပါသည်။"
 
+    /**
+     * ISSUE-035 — stored on an entry when no original exception object exists.
+     * It is recorded explicitly at record time; an exception is never
+     * synthesized later to fill the gap.
+     */
+    const val ORIGINAL_EXCEPTION_UNAVAILABLE = "ORIGINAL_EXCEPTION_UNAVAILABLE"
+
+    /** ISSUE-035 — UniversalAppLauncher structured codes -> RESOURCE_UNAVAILABLE (#25). */
+    private val LAUNCHER_RESOURCE_CODES = setOf(
+        "APP_NOT_FOUND",
+        "APP_NOT_FOUND_OR_LOW_CONFIDENCE",
+        "PACKAGE_DISABLED_OR_NOT_FOUND",
+        "NO_LAUNCH_INTENT"
+    )
+
+    /** ISSUE-035 — UniversalAppLauncher structured codes -> INTENT_MISUNDERSTANDING (#11). */
+    private val LAUNCHER_INTENT_CODES = setOf("AMBIGUOUS_APP_MATCH")
+
+    private val STRUCTURED_CODE_REGEX = Regex("\\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\\b")
+
     enum class ExecutionOutcome {
         PASS,
         FAIL,
@@ -222,7 +242,11 @@ object ErrorLearningWorkflowEngine {
         val lastSeenMs: Long = timestampMs,
         val occurrenceCount: Int = 1,
         val status: ErrorLifecycleStatus = ErrorLifecycleStatus.BLOCKED,
-        val statusTransitionHistory: List<String> = listOf("FAILED -> BLOCKED")
+        val statusTransitionHistory: List<String> = listOf("FAILED -> BLOCKED"),
+        // ISSUE-035 — canonical structured evidence stored verbatim at record time
+        val errorCode: String = "",
+        val exceptionClass: String = ORIGINAL_EXCEPTION_UNAVAILABLE,
+        val exceptionMessage: String = ""
     ) {
         fun toFormattedReport(): String {
             return buildString {
@@ -237,6 +261,8 @@ object ErrorLearningWorkflowEngine {
                 appendLine("Resource / Source Limitation: ${threeFactorAnalysis.resourceLimitation}")
                 appendLine("Real-World / Practical Mismatch: ${threeFactorAnalysis.realWorldMismatch}")
                 appendLine("Evidence: $evidence")
+                appendLine("Error Code: ${errorCode.ifBlank { "(none recorded)" }}")
+                appendLine("Original Exception: $exceptionClass${if (exceptionMessage.isNotBlank()) " — $exceptionMessage" else ""}")
                 appendLine("Attempted Method: $attemptedMethod")
                 appendLine("Result: ${result.name}")
                 appendLine("Root Cause: $rootCause")
@@ -283,6 +309,9 @@ object ErrorLearningWorkflowEngine {
                 put("occurrenceCount", occurrenceCount)
                 put("status", status.name)
                 put("statusTransitionHistory", JSONArray(statusTransitionHistory))
+                put("errorCode", errorCode)
+                put("exceptionClass", exceptionClass)
+                put("exceptionMessage", exceptionMessage)
             }
         }
 
@@ -355,7 +384,10 @@ object ErrorLearningWorkflowEngine {
                     lastSeenMs = obj.optLong("lastSeenMs", ts),
                     occurrenceCount = obj.optInt("occurrenceCount", 1),
                     status = lifecycleStatus,
-                    statusTransitionHistory = historyList
+                    statusTransitionHistory = historyList,
+                    errorCode = obj.optString("errorCode", ""),
+                    exceptionClass = obj.optString("exceptionClass", ORIGINAL_EXCEPTION_UNAVAILABLE),
+                    exceptionMessage = obj.optString("exceptionMessage", "")
                 )
             }
         }
@@ -503,7 +535,8 @@ object ErrorLearningWorkflowEngine {
         recoveryResult: String = "Alternative path ready; failed method blocked from blind reuse",
         verificationStatus: String = "Not verified (Action failed; recorded truthfully without fabrication)",
         intent: String = "UNKNOWN",
-        targetPackage: String = "system"
+        targetPackage: String = "system",
+        errorCode: String? = null
     ): ErrorLogEntry {
         val now = System.currentTimeMillis()
         val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(now))
@@ -516,9 +549,16 @@ object ErrorLearningWorkflowEngine {
             safeEvidenceRaw.ifBlank { "INSUFFICIENT_EVIDENCE" }
         )
 
+        // ISSUE-035: resolve the canonical structured error code (explicit
+        // caller value wins; otherwise extract from the raw evidence), and
+        // normalize underscores to spaces at the classifier boundary so the
+        // ER-007 underscore-vs-space mismatch is impossible by construction.
+        val resolvedErrorCode = errorCode?.takeIf { it.isNotBlank() }
+            ?: extractStructuredCode(safeEvidenceRaw + " " + actualResult)
         val lowerEvidence = (safeEvidenceRaw + " " + (exception?.message ?: "")).trim().lowercase(Locale.ROOT)
-        val taxonomy = classifyTaxonomy(lowerEvidence)
-        val threeFactors = analyzeThreeFactors(lowerEvidence, attemptedMethod, taxonomy)
+        val normalizedEvidence = lowerEvidence.replace('_', ' ')
+        val taxonomy = classifyTaxonomy(normalizedEvidence, resolvedErrorCode)
+        val threeFactors = analyzeThreeFactors(normalizedEvidence, attemptedMethod, taxonomy, resolvedErrorCode)
         val (simpleEn, simpleMm) = generateSimpleExplanation(taxonomy, threeFactors)
         val recoveryPolicy = determineRecoveryPolicy(taxonomy)
 
@@ -569,7 +609,12 @@ object ErrorLearningWorkflowEngine {
             lastSeenMs = now,
             occurrenceCount = (existingEntry?.occurrenceCount ?: 0) + 1,
             status = ErrorLifecycleStatus.BLOCKED,
-            statusTransitionHistory = (existingEntry?.statusTransitionHistory ?: emptyList()) + "FAILED -> BLOCKED ($errorId)"
+            statusTransitionHistory = (existingEntry?.statusTransitionHistory ?: emptyList()) + "FAILED -> BLOCKED ($errorId)",
+            errorCode = resolvedErrorCode,
+            exceptionClass = exception?.javaClass?.name ?: ORIGINAL_EXCEPTION_UNAVAILABLE,
+            exceptionMessage = exception?.message?.let {
+                SensitiveDataRedactor.redactForAuditLog(it).take(300)
+            } ?: ""
         )
 
         errorLogHistory.add(entry)
@@ -892,8 +937,33 @@ object ErrorLearningWorkflowEngine {
 
     private fun normalizeKey(raw: String): String = raw.trim().lowercase(Locale.ROOT)
 
-    private fun classifyTaxonomy(lowerEvidence: String): ErrorTaxonomy {
-        if (lowerEvidence.isBlank() || lowerEvidence == "insufficient_evidence" || lowerEvidence == "unknown") {
+    /**
+     * ISSUE-035 — extracts a canonical structured error code from raw evidence
+     * text. Known UniversalAppLauncher codes are matched first; otherwise the
+     * first UPPER_SNAKE token is taken as the code. Returns "" when none.
+     */
+    private fun extractStructuredCode(rawText: String): String {
+        val upper = rawText.uppercase(Locale.ROOT)
+        // Longest first: APP_NOT_FOUND is a substring of
+        // APP_NOT_FOUND_OR_LOW_CONFIDENCE and must not shadow it.
+        val knownCodes = (LAUNCHER_RESOURCE_CODES + LAUNCHER_INTENT_CODES)
+            .sortedByDescending { it.length }
+        for (code in knownCodes) {
+            if (upper.contains(code)) return code
+        }
+        return STRUCTURED_CODE_REGEX.find(upper)?.value ?: ""
+    }
+
+    private fun classifyTaxonomy(lowerEvidence: String, structuredCode: String = ""): ErrorTaxonomy {
+        // ISSUE-035: explicit structured-code mapping runs FIRST, before any
+        // keyword matching, so spelling variants cannot change the taxonomy.
+        if (structuredCode in LAUNCHER_RESOURCE_CODES) {
+            return ErrorTaxonomy.RESOURCE_UNAVAILABLE_ERROR
+        }
+        if (structuredCode in LAUNCHER_INTENT_CODES) {
+            return ErrorTaxonomy.INTENT_MISUNDERSTANDING_ERROR
+        }
+        if (lowerEvidence.isBlank() || lowerEvidence == "insufficient evidence" || lowerEvidence == "unknown") {
             return ErrorTaxonomy.UNKNOWN
         }
         return when {
@@ -937,8 +1007,18 @@ object ErrorLearningWorkflowEngine {
     private fun analyzeThreeFactors(
         lowerEvidence: String,
         attemptedMethod: String,
-        taxonomy: ErrorTaxonomy
+        taxonomy: ErrorTaxonomy,
+        structuredCode: String = ""
     ): ThreeFactorAnalysis {
+        // ISSUE-035: when a structured error code was stored, the 3-factor
+        // analysis derives from that fact instead of the generic templates.
+        if (structuredCode in LAUNCHER_RESOURCE_CODES || structuredCode in LAUNCHER_INTENT_CODES) {
+            return ThreeFactorAnalysis(
+                technicalCause = "UniversalAppLauncher returned structured error code $structuredCode for the requested target (stored verbatim on this entry).",
+                resourceLimitation = "The target application package is not installed, is disabled, or could not be resolved/launched with sufficient confidence on this device.",
+                realWorldMismatch = "The command assumed the target app exists and can be identified on the user's phone; the launcher's structured result proves otherwise in the current environment."
+            )
+        }
         if (taxonomy == ErrorTaxonomy.UNKNOWN) {
             return ThreeFactorAnalysis(
                 technicalCause = "CAUSE = UNKNOWN (Insufficient diagnostic evidence to prove specific technical fault).",

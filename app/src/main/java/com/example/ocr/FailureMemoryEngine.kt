@@ -132,7 +132,8 @@ object FailureMemoryEngine {
         category: FailureCategory,
         rootCauseMm: String,
         technicalDetails: String,
-        suggestedRemediationMm: String
+        suggestedRemediationMm: String,
+        exception: Throwable? = null
     ): FailureRecord {
         val list = failureHistory.computeIfAbsent(component) { CopyOnWriteArrayList() }
         val existing = list.find { it.operation == operation && it.failureCategory == category }
@@ -178,7 +179,8 @@ object FailureMemoryEngine {
                 attemptedMethod = "$component.$operation",
                 evidence = technicalDetails,
                 recoveryAttempt = suggestedRemediationMm,
-                recoveryResult = "NOT_EXECUTED"
+                recoveryResult = "NOT_EXECUTED",
+                exception = exception
             )
         } catch (e: Exception) {
             Log.w(TAG, "ErrorLearningWorkflowEngine sync note: ${e.message}")

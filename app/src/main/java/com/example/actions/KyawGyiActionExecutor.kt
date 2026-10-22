@@ -559,7 +559,8 @@ open class KyawGyiActionExecutor(val context: Context) {
                 category = FailureCategory.TECHNICAL,
                 rootCauseMm = "အက်ပ်ဖွင့်ရာတွင် စနစ်ဆိုင်ရာ ချို့ယွင်းချက် ဖြစ်ပေါ်ပါသည်",
                 technicalDetails = "${e.javaClass.simpleName}: ${e.localizedMessage}",
-                suggestedRemediationMm = "ဖုန်းမျက်နှာပြင်မှတစ်ဆင့် အက်ပ်ကို ကိုယ်တိုင်ဖွင့်ကြည့်ပါ"
+                suggestedRemediationMm = "ဖုန်းမျက်နှာပြင်မှတစ်ဆင့် အက်ပ်ကို ကိုယ်တိုင်ဖွင့်ကြည့်ပါ",
+                exception = e
             )
             val baseMsg = "အက်ပ်ဖွင့်ရာတွင် အမှားဖြစ်ပွားပါသည်: ${e.localizedMessage}"
             val finalMsg = if (preWarning != null) "$preWarning\n\n$baseMsg" else baseMsg
