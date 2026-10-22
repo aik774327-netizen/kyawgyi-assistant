@@ -412,12 +412,11 @@ object ErrorLearningWorkflowEngine {
         prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadFromPersistentStorage()
         // NOTE (FAKE-10, 2026-10-22): initialize() previously auto-resolved
-        // every stale TTS blocked record here, claiming "Verified via
-        // MyanmarTTSEngine: Universal Burmese Phonetic G2P Fallback is active
-        // on com.google.android.tts" - a verification that was never
-        // performed. Blocked records now clear only through a real live
-        // check (verifyLiveEnvironmentConditions), a verified successful
-        // execution, or an explicit user action in the log viewer.
+        // every stale TTS blocked record here, claiming a verification that
+        // was never performed. Blocked records now clear ONLY through a typed
+        // VerificationResult (ISSUE-034): a real live check via
+        // verifyLiveEnvironmentConditions, or a verified successful execution.
+        // There is no user-action or free-text-evidence clearing path.
     }
 
     @Synchronized
@@ -620,23 +619,16 @@ object ErrorLearningWorkflowEngine {
     @Synchronized
     fun evaluateRequestedAction(
         commandKey: String,
-        hasNewEvidenceConditionsChanged: Boolean = false,
         context: Context? = appContext
     ): FailedMethodWarning? {
         val key = normalizeKey(commandKey)
         val previousLog = failedMethodMemory[key] ?: return null
 
-        if (hasNewEvidenceConditionsChanged) {
-            Log.i(TAG, "Explicit new evidence confirms underlying conditions changed for '$key'. Transitioning to RETRY_ALLOWED.")
-            clearFailedMethodWithVerifiedEvidence(key, "Explicitly verified condition change")
-            return null
-        }
-
         if (context != null) {
             val liveResult = verifyLiveEnvironmentConditions(context, previousLog)
             if (liveResult != null && liveResult.outcome == VerificationOutcome.VERIFIED) {
                 Log.i(TAG, "Live Condition Verifier confirmed environment resolved for '$key': ${liveResult.summaryLine()}")
-                clearFailedMethodWithVerifiedEvidence(key, liveResult.summaryLine())
+                clearFailedMethodWithVerification(liveResult)
                 return null
             }
         }
@@ -771,42 +763,117 @@ object ErrorLearningWorkflowEngine {
     }
 
     /**
-     * ITEM 13 — Non-Destructive Lifecycle Transition on Resolution:
-     * Transitions the historical record through:
-     * BLOCKED -> CONDITION_CHANGED -> RETRY_ALLOWED -> VERIFIED_SUCCESS -> RESOLVED
-     * while NEVER deleting the historical record from [errorLogHistory].
+     * ISSUE-034 — Runs the live verifier for one blocked record and clears it
+     * ONLY when the verifier returns [VerificationOutcome.VERIFIED]. Every
+     * outcome is returned to the caller as a typed [VerificationResult] so UI,
+     * log and memory always show the same state:
+     * missing resource -> BLOCKED, failed check -> FAILED, no verifier branch
+     * or inconclusive check -> UNVERIFIED (record stays blocked).
      */
     @Synchronized
-    fun clearFailedMethodWithVerifiedEvidence(commandKey: String, verificationEvidence: String): Boolean {
-        if (verificationEvidence.isBlank()) return false
+    fun verifyBlockedMethod(
+        commandKey: String,
+        context: Context? = appContext
+    ): VerificationResult {
         val key = normalizeKey(commandKey)
-        val removed = failedMethodMemory.remove(key)
-        if (removed != null) {
-            // Update the historical record in errorLogHistory WITHOUT deleting it
-            val histIdx = errorLogHistory.indexOfLast { it.errorId == removed.errorId || it.commandKey == key }
-            if (histIdx >= 0) {
-                val old = errorLogHistory[histIdx]
-                val updated = old.copy(
-                    status = ErrorLifecycleStatus.RESOLVED,
-                    lastSeenMs = System.currentTimeMillis(),
-                    recoveryResult = "RESOLVED: $verificationEvidence",
-                    verificationStatus = "Verified condition change & resolution ($verificationEvidence)",
-                    statusTransitionHistory = old.statusTransitionHistory + listOf(
-                        "MUTATED",
-                        "CONDITION_CHANGED ($verificationEvidence)",
-                        "RETRY_ALLOWED",
-                        "VERIFIED_SUCCESS",
-                        "RESOLVED"
-                    )
-                )
-                errorLogHistory[histIdx] = updated
-            }
-            saveToPersistentStorage()
-            publishStateFlows()
-            Log.i(TAG, "Transitioned failed method '$key' to RESOLVED (history preserved): $verificationEvidence")
-            return true
+        val previousLog = failedMethodMemory[key]
+            ?: return VerificationResult(
+                outcome = VerificationOutcome.UNVERIFIED,
+                errorId = "",
+                commandKey = key,
+                checkedAtMs = System.currentTimeMillis(),
+                evidenceSource = "NONE",
+                detail = "No blocked failed-method record exists for this key; nothing was verified or cleared."
+            )
+        if (context == null) {
+            return VerificationResult(
+                outcome = VerificationOutcome.UNVERIFIED,
+                errorId = previousLog.errorId,
+                commandKey = key,
+                checkedAtMs = System.currentTimeMillis(),
+                evidenceSource = "NONE",
+                detail = "No Context available to run a live check; the record was NOT cleared."
+            )
         }
-        return false
+        val result = verifyLiveEnvironmentConditions(context, previousLog)
+            ?: return VerificationResult(
+                outcome = VerificationOutcome.UNVERIFIED,
+                errorId = previousLog.errorId,
+                commandKey = key,
+                checkedAtMs = System.currentTimeMillis(),
+                evidenceSource = "NONE",
+                detail = "No automatic verifier exists for this error type (${previousLog.errorType}); the record was NOT cleared. Retry the action manually — a verified successful retry clears it."
+            )
+        if (result.outcome == VerificationOutcome.VERIFIED) {
+            clearFailedMethodWithVerification(result)
+        }
+        return result
+    }
+
+    /**
+     * ISSUE-034 — Mints a typed [VerificationResult] for a VERIFIED SUCCESSFUL
+     * EXECUTION of a previously blocked method (the execution itself, checked
+     * by the caller's result verifier, is the evidence). Bound to the blocked
+     * record's error ID; returns null when no blocked record exists.
+     */
+    @Synchronized
+    fun verificationFromExecutionSuccess(commandKey: String, detail: String): VerificationResult? {
+        val key = normalizeKey(commandKey)
+        val blocked = failedMethodMemory[key] ?: return null
+        return VerificationResult(
+            outcome = VerificationOutcome.VERIFIED,
+            errorId = blocked.errorId,
+            commandKey = key,
+            checkedAtMs = System.currentTimeMillis(),
+            evidenceSource = "EXECUTION_SUCCESS",
+            detail = detail
+        )
+    }
+
+    /**
+     * ITEM 13 + ISSUE-034 — Non-Destructive Lifecycle Transition on Resolution:
+     * BLOCKED -> CONDITION_CHANGED -> RETRY_ALLOWED -> VERIFIED_SUCCESS -> RESOLVED,
+     * NEVER deleting the historical record from [errorLogHistory].
+     *
+     * The ONLY way a record can reach VERIFIED_SUCCESS / RESOLVED: a typed
+     * [VerificationResult] with outcome VERIFIED whose errorId AND commandKey
+     * bind to the blocked record. Free-text evidence strings are not accepted
+     * anywhere (the previous String-based API was removed in ISSUE-034).
+     */
+    @Synchronized
+    fun clearFailedMethodWithVerification(result: VerificationResult): Boolean {
+        if (result.outcome != VerificationOutcome.VERIFIED) return false
+        val key = normalizeKey(result.commandKey)
+        val blocked = failedMethodMemory[key] ?: return false
+        if (blocked.errorId != result.errorId) {
+            Log.w(TAG, "Refused to clear '$key': verification is bound to ${result.errorId}, blocked record is ${blocked.errorId}")
+            return false
+        }
+        val evidence = result.summaryLine()
+        failedMethodMemory.remove(key)
+        // Update the historical record in errorLogHistory WITHOUT deleting it
+        val histIdx = errorLogHistory.indexOfLast { it.errorId == blocked.errorId || it.commandKey == key }
+        if (histIdx >= 0) {
+            val old = errorLogHistory[histIdx]
+            val updated = old.copy(
+                status = ErrorLifecycleStatus.RESOLVED,
+                lastSeenMs = System.currentTimeMillis(),
+                recoveryResult = "RESOLVED: $evidence",
+                verificationStatus = "Verified by ${result.evidenceSource} (${result.detail})",
+                statusTransitionHistory = old.statusTransitionHistory + listOf(
+                    "MUTATED",
+                    "CONDITION_CHANGED ($evidence)",
+                    "RETRY_ALLOWED",
+                    "VERIFIED_SUCCESS",
+                    "RESOLVED"
+                )
+            )
+            errorLogHistory[histIdx] = updated
+        }
+        saveToPersistentStorage()
+        publishStateFlows()
+        Log.i(TAG, "Transitioned failed method '$key' to RESOLVED (history preserved): $evidence")
+        return true
     }
 
     @Synchronized

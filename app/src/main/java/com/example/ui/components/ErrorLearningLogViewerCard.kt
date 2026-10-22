@@ -27,7 +27,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audit.ErrorLearningWorkflowEngine
+import com.example.audit.VerificationOutcome
 import com.example.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ErrorLearningLogViewerCard
@@ -57,6 +61,7 @@ fun ErrorLearningLogViewerCard(
     var selectedLogForDetail by remember { mutableStateOf<ErrorLearningWorkflowEngine.ErrorLogEntry?>(null) }
     var showFullLogDialog by remember { mutableStateOf(false) }
     var liveVerifyStatusBanner by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Surface(
         modifier = modifier
@@ -290,16 +295,21 @@ fun ErrorLearningLogViewerCard(
                             ) {
                                 OutlinedButton(
                                     onClick = {
-                                        val warning = ErrorLearningWorkflowEngine.evaluateRequestedAction(
-                                            commandKey = cmdKey,
-                                            context = context
-                                        )
-                                        if (warning == null) {
-                                            liveVerifyStatusBanner =
-                                                "✓ Live Condition Verifier: '$cmdKey' အတွက် ပတ်ဝန်းကျင်အခြေအနေ ပြန်လည်ကောင်းမွန်ကြောင်း အတည်ပြုပြီး ပိတ်ပင်မှု ဖြေလျှော့ပေးလိုက်ပါပြီ။"
-                                        } else {
-                                            liveVerifyStatusBanner =
-                                                "⚠ Live Condition Verifier: '$cmdKey' အတွက် လိုအပ်ချက် (${warning.requiredEvidenceToRetry}) မပြည့်စုံသေးသဖြင့် ဆက်လက်ပိတ်ပင်ထားပါသည်။"
+                                        // ISSUE-034: run the typed live verifier (off the main
+                                        // thread — the TTS probe blocks with bounded waits) and
+                                        // show its actual outcome. A record clears only on
+                                        // VerificationOutcome.VERIFIED.
+                                        scope.launch(Dispatchers.IO) {
+                                            val result = ErrorLearningWorkflowEngine.verifyBlockedMethod(
+                                                commandKey = cmdKey,
+                                                context = context
+                                            )
+                                            liveVerifyStatusBanner = when (result.outcome) {
+                                                VerificationOutcome.VERIFIED ->
+                                                    "✓ Live Condition Verifier: '$cmdKey' အတွက် ပတ်ဝန်းကျင်အခြေအနေ ပြန်လည်ကောင်းမွန်ကြောင်း အတည်ပြုပြီး ပိတ်ပင်မှု ဖြေလျှော့ပေးလိုက်ပါပြီ။ (${result.evidenceSource})"
+                                                else ->
+                                                    "⚠ Live Condition Verifier: '$cmdKey' — ${result.outcome.name}: ${result.detail}"
+                                            }
                                         }
                                     },
                                     modifier = Modifier
@@ -414,25 +424,31 @@ fun ErrorLearningLogViewerCard(
 
                 OutlinedButton(
                     onClick = {
-                        var resolvedCount = 0
-                        val currentBlocked = ErrorLearningWorkflowEngine.blockedMethodsFlow.value.keys.toList()
-                        currentBlocked.forEach { key ->
-                            val warning = ErrorLearningWorkflowEngine.evaluateRequestedAction(
-                                commandKey = key,
-                                context = context
-                            )
-                            if (warning == null) {
-                                resolvedCount++
+                        // ISSUE-034: bulk action = run the typed verifier PER ITEM and
+                        // report per-item outcomes. Items clear only on VERIFIED.
+                        scope.launch {
+                            val currentBlocked = ErrorLearningWorkflowEngine.blockedMethodsFlow.value.keys.toList()
+                            if (currentBlocked.isEmpty()) {
+                                liveVerifyStatusBanner = "✓ ပိတ်ပင်ထားသော နည်းလမ်း မရှိပါ။ စနစ်အခြေအနေ ကောင်းမွန်ပါသည်။"
+                            } else {
+                                val results = withContext(Dispatchers.IO) {
+                                    currentBlocked.map { key ->
+                                        key to ErrorLearningWorkflowEngine.verifyBlockedMethod(
+                                            commandKey = key,
+                                            context = context
+                                        )
+                                    }
+                                }
+                                val clearedCount = results.count { it.second.outcome == VerificationOutcome.VERIFIED }
+                                liveVerifyStatusBanner = buildString {
+                                    append("Live Condition Verifier — တစ်ခုချင်း ရလဒ် (ဖြေလျှော့ပြီး $clearedCount/${results.size}):")
+                                    results.forEach { (key, result) ->
+                                        append("\n• $key: ${result.outcome.name} (${result.evidenceSource})")
+                                    }
+                                }
                             }
+                            Toast.makeText(context, liveVerifyStatusBanner, Toast.LENGTH_SHORT).show()
                         }
-                        liveVerifyStatusBanner = if (currentBlocked.isEmpty()) {
-                            "✓ ပိတ်ပင်ထားသော နည်းလမ်း မရှိပါ။ စနစ်အခြေအနေ ကောင်းမွန်ပါသည်။"
-                        } else if (resolvedCount > 0) {
-                            "✓ Live Condition Verifier: စုစုပေါင်း $resolvedCount ခု ပတ်ဝန်းကျင်အခြေအနေ ပြန်ကောင်းသွားသဖြင့် ပိတ်ပင်မှု ဖြေလျှော့ပြီးပါပြီ။"
-                        } else {
-                            "⚠ Live Condition Verifier: ပိတ်ပင်ထားသော နည်းလမ်း ${currentBlocked.size} ခုလုံးအတွက် လိုအပ်သော ခွင့်ပြုချက်/ကွန်ရက် မပြောင်းလဲသေးပါ။"
-                        }
-                        Toast.makeText(context, liveVerifyStatusBanner, Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier
                         .height(40.dp)
@@ -506,45 +522,34 @@ fun ErrorLearningLogViewerCard(
                                 entry = entry,
                                 isCurrentlyBlocked = blockedMethods.containsKey(entry.commandKey),
                                 onVerifyCondition = {
-                                    val warning = ErrorLearningWorkflowEngine.evaluateRequestedAction(
-                                        commandKey = entry.commandKey,
-                                        context = context
-                                    )
-                                    val msg = if (warning == null) {
-                                        "Verified: '${entry.commandKey}' condition resolved and unblocked."
-                                    } else {
-                                        "Still blocked: ${warning.requiredEvidenceToRetry}"
+                                    // ISSUE-034: typed verifier only; outcome shown verbatim.
+                                    scope.launch(Dispatchers.IO) {
+                                        val result = ErrorLearningWorkflowEngine.verifyBlockedMethod(
+                                            commandKey = entry.commandKey,
+                                            context = context
+                                        )
+                                        val msg = when (result.outcome) {
+                                            VerificationOutcome.VERIFIED ->
+                                                "Verified: '${entry.commandKey}' condition resolved and unblocked."
+                                            else ->
+                                                "Still blocked (${result.outcome.name}): ${result.detail}"
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        }
                                     }
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }
                     }
                 }
             },
-            dismissButton = {
-                if (blockedMethods.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            val keys = blockedMethods.keys.toList()
-                            keys.forEach { key ->
-                                ErrorLearningWorkflowEngine.clearFailedMethodWithVerifiedEvidence(
-                                    key,
-                                    "User verified & activated fallback recovery in Error-Learning Log Viewer"
-                                )
-                            }
-                            Toast.makeText(
-                                context,
-                                "ပိတ်ပင်ထားသော နည်းလမ်း ${keys.size} ခုလုံးကို အစားထိုးစနစ်ဖြင့် ဖြေရှင်းပြီးပါပြီ ✓",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        modifier = Modifier.testTag("resolve_all_blocked_dialog_btn")
-                    ) {
-                        Text("အားလုံး ဖြေရှင်းမည်", color = AngelNeonGreen, fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
+            // ISSUE-034: the former "Resolve All" button was REMOVED. It cleared
+            // every blocked record with a hard-coded evidence string and no
+            // verification at all. Records now clear only through a typed
+            // VerificationResult (live verifier per item, or a verified
+            // successful execution) — see the per-item verify actions and the
+            // "Live Verify" bulk verifier on the card.
             confirmButton = {
                 TextButton(
                     onClick = { showFullLogDialog = false },

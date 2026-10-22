@@ -589,10 +589,15 @@ class UnifiedIntelligencePipeline(
                 recoveryResult = if (alternativeFlow != null) "FALLBACK_GUIDANCE_PROVIDED" else "NOT_EXECUTED"
             )
         } else {
-            com.example.audit.ErrorLearningWorkflowEngine.clearFailedMethodWithVerifiedEvidence(
+            // ISSUE-034: a verified successful execution clears a blocked record
+            // only through a typed VerificationResult bound to that record.
+            val successVerification = com.example.audit.ErrorLearningWorkflowEngine.verificationFromExecutionSuccess(
                 commandKey = cleanedText,
-                verificationEvidence = "Verified execution succeeded for $registryActionType on ${finalTarget ?: "system"}"
+                detail = "Verified execution succeeded for $registryActionType on ${finalTarget ?: "system"}"
             )
+            if (successVerification != null) {
+                com.example.audit.ErrorLearningWorkflowEngine.clearFailedMethodWithVerification(successVerification)
+            }
             try {
                 val db = com.example.data.AppDatabase.getDatabase(context)
                 db.commandLogDao().insertCommandLog(

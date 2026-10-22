@@ -1,5 +1,7 @@
 package com.kyawgyi.voice
 
+import android.Manifest
+import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
@@ -29,6 +31,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import java.io.File
 
@@ -172,12 +175,16 @@ class KyawGyiProductionAcceptanceTest {
         // Verify it is currently blocked
         assertNotNull(ErrorLearningWorkflowEngine.evaluateRequestedAction("call_contact_test"))
 
-        // Resolve condition with verified evidence -> Must transition to RESOLVED and NEVER delete history!
-        val resolved = ErrorLearningWorkflowEngine.clearFailedMethodWithVerifiedEvidence(
-            commandKey = "call_contact_test",
-            verificationEvidence = "User granted CALL_PHONE permission"
+        // ISSUE-034: resolution is possible ONLY through a typed VerificationResult
+        // produced by a real check. Grant CALL_PHONE for real (Robolectric shadow),
+        // then run the live verifier — its RUNTIME_PERMISSION branch re-checks
+        // ContextCompat.checkSelfPermission and only then may the record resolve.
+        Shadows.shadowOf(context as Application).grantPermissions(Manifest.permission.CALL_PHONE)
+        val verifyResult = ErrorLearningWorkflowEngine.verifyBlockedMethod("call_contact_test", context)
+        assertEquals(
+            com.example.audit.VerificationOutcome.VERIFIED,
+            verifyResult.outcome
         )
-        assertTrue(resolved)
         assertNull("Method should no longer be blocked after resolution", ErrorLearningWorkflowEngine.evaluateRequestedAction("call_contact_test"))
 
         val allHistory = ErrorLearningWorkflowEngine.getAllErrorLogs()
