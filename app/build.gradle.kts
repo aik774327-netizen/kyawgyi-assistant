@@ -32,7 +32,13 @@ android {
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
+      // ISSUE-042: pinned TEST-ONLY debug keystore committed at the repo
+      // root (public AOSP debug credentials) so successive CI test builds
+      // share one signature and a new test APK installs OVER the previous
+      // one without wiping app data (vault, error-learning history).
+      // Release signing above is env-based and untouched.
       storeFile = file("${rootDir}/debug.keystore")
+      storeType = "PKCS12"
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"

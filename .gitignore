@@ -18,6 +18,11 @@ local.properties
 debug.keystore
 *.jks
 *.keystore
+# ISSUE-042: the pinned CI debug keystore is committed ON PURPOSE so every
+# CI test build shares one stable debug signature (update-installs keep app
+# data). It is a TEST-ONLY keystore with the public AOSP debug credentials
+# (alias androiddebugkey / password android) - never use it for release.
+!/debug.keystore
 *.p12
 *.pfx
 *.pem

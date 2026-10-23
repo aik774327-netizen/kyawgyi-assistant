@@ -23,15 +23,21 @@ jobs:
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
       - name: Install SDK 36
         run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
-      - name: Generate debug keystore
+      # ISSUE-042: do NOT generate a fresh keystore per run. The repo pins a
+      # committed TEST-ONLY debug keystore (debug.keystore, public AOSP debug
+      # credentials) so every CI test APK shares one signature and installs
+      # over the previous build without wiping app data.
+      - name: Verify pinned debug keystore
         run: |
-          keytool -genkeypair -v -keystore debug.keystore \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass android -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US"
+          test -f debug.keystore || { echo "Pinned debug.keystore missing from repo root"; exit 1; }
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep "SHA256:"
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
         timeout-minutes: 30
+      - name: Print APK signing certificate (ISSUE-042 evidence)
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
+          $APKSIGNER verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -i "SHA-256"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -56,12 +62,8 @@ jobs:
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
       - name: Install SDK 36
         run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
-      - name: Generate debug keystore
-        run: |
-          keytool -genkeypair -v -keystore debug.keystore \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass android -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US"
+      # ISSUE-042: no per-run keystore generation (see build job). This job
+      # does not sign anything; the pinned repo keystore is used as-is.
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
         timeout-minutes: 30
