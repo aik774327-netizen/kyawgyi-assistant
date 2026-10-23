@@ -35,11 +35,70 @@ import com.example.ui.theme.AngelTextSecondary
 import com.example.utils.MyanmarTTSDiagnosticHelper
 import com.example.utils.MyanmarTTSEngine
 import com.example.utils.MyanmarWarmNaturalSpeechSystem
+import com.example.utils.TtsDiagnosticReport
+import com.example.utils.TtsSupportStatus
 import com.kyawgyi.voice.AudioFocusAndAecManager
 import com.kyawgyi.voice.F5MyanmarTtsClient
 import com.kyawgyi.voice.SttEngineManager
 import com.kyawgyi.voice.SttEngineType
 import kotlinx.coroutines.launch
+
+/**
+ * ISSUE-041 — derives the inspector card's header subtitle from LIVE
+ * diagnostics (active STT engine type + availability, and the TTS
+ * diagnostic report's status + engine package). The card REPORTS state; it
+ * must never assert a capability (the previous hard-coded subtitle claimed
+ * "Google my-MM TTS" even when the my-MM voice data was missing).
+ */
+internal fun inspectorEngineSubtitle(
+    sttAvailable: Boolean,
+    sttEngineType: SttEngineType,
+    report: TtsDiagnosticReport
+): String {
+    val sttPart = when (sttEngineType) {
+        SttEngineType.SYSTEM_ON_DEVICE ->
+            if (sttAvailable) "System STT (on-device)" else "System STT (unavailable)"
+    }
+    val engineSuffix = report.currentEnginePackage.takeIf { it.isNotBlank() }?.let { " [$it]" } ?: ""
+    val ttsPart = when (report.status) {
+        TtsSupportStatus.CHECKING -> "TTS: စစ်ဆေးနေပါသည်$engineSuffix"
+        TtsSupportStatus.READY -> "TTS: my-MM voice ready$engineSuffix"
+        TtsSupportStatus.MISSING_DATA -> "TTS: my-MM voice data missing$engineSuffix"
+        TtsSupportStatus.NOT_SUPPORTED -> "TTS: my-MM not supported$engineSuffix"
+        TtsSupportStatus.INITIALIZATION_FAILED -> "TTS: initialization failed$engineSuffix"
+    }
+    return "$sttPart • $ttsPart"
+}
+
+/**
+ * ISSUE-041 — the refresh Toast must reflect the diagnostics OUTCOME, not
+ * claim success unconditionally.
+ */
+internal fun inspectorRefreshToast(report: TtsDiagnosticReport): String {
+    return when (report.status) {
+        TtsSupportStatus.READY ->
+            "STT/TTS ပြန်စစ်ပြီး: my-MM အသံ အဆင်သင့်ရှိပါသည် ✓"
+        TtsSupportStatus.MISSING_DATA ->
+            "STT/TTS ပြန်စစ်ပြီး: my-MM အသံဒေတာ မရှိသေးပါ — Voice Pack ဒေါင်းလုဒ်လုပ်ရန် လိုအပ်ပါသည်"
+        TtsSupportStatus.NOT_SUPPORTED ->
+            "STT/TTS ပြန်စစ်ပြီး: ဤစက်၏ TTS engine သည် my-MM ကို မထောက်ပံ့ပါ"
+        TtsSupportStatus.INITIALIZATION_FAILED ->
+            "STT/TTS ပြန်စစ်ပြီး: TTS engine စတင်ရန် မအောင်မြင်ပါ"
+        TtsSupportStatus.CHECKING ->
+            "STT/TTS စစ်ဆေးနေဆဲ ဖြစ်ပါသည်..."
+    }
+}
+
+/** ISSUE-041 — truthful my-MM voice line for the TTS section (no fallback claims). */
+internal fun inspectorVoiceSummary(report: TtsDiagnosticReport): String {
+    return when (report.status) {
+        TtsSupportStatus.READY -> "my-MM voice pack ထည့်သွင်းထားပြီး အသံထွက်ရန် အဆင်သင့်ရှိပါသည်"
+        TtsSupportStatus.MISSING_DATA -> "my-MM voice data မရှိသေးပါ — မြန်မာအသံထွက်အတွက် voice data ဒေါင်းလုဒ်လုပ်ရန် လိုအပ်ပါသည် (phonetic fallback မရှိပါ)"
+        TtsSupportStatus.NOT_SUPPORTED -> "လက်ရှိ TTS engine တွင် my-MM voice မရှိပါ"
+        TtsSupportStatus.INITIALIZATION_FAILED -> "TTS engine စတင်ရန် မအောင်မြင်သဖြင့် my-MM အခြေအနေ မသိနိုင်ပါ"
+        TtsSupportStatus.CHECKING -> "my-MM voice အခြေအနေ စစ်ဆေးနေပါသည်..."
+    }
+}
 
 /**
  * MyanmarSttTtsEngineInspectorCard
@@ -71,6 +130,16 @@ fun MyanmarSttTtsEngineInspectorCard(
     val sttUiState by sttManager.uiState.collectAsState()
     val captureModuleState by sttManager.audioCaptureModule.captureState.collectAsState()
     var sttHealth by remember { mutableStateOf(sttManager.getHealthReport()) }
+    // ISSUE-041: set when the user taps Refresh; the outcome Toast fires once
+    // diagnostics leave the CHECKING state.
+    var refreshToastPending by remember { mutableStateOf(false) }
+
+    LaunchedEffect(ttsReport.status) {
+        if (refreshToastPending && ttsReport.status != TtsSupportStatus.CHECKING) {
+            refreshToastPending = false
+            Toast.makeText(context, inspectorRefreshToast(ttsReport), Toast.LENGTH_LONG).show()
+        }
+    }
 
     // Sample Myanmar test sentence covering Code-Switching, Phone Number, Time, Currency, and Percentages
     var testInputText by remember {
@@ -164,7 +233,12 @@ fun MyanmarSttTtsEngineInspectorCard(
                             color = Color.White
                         )
                         Text(
-                            text = "System STT • Google my-MM TTS • NLU & G2P Verifier",
+                            // ISSUE-041: derived from live diagnostics, never asserted.
+                            text = inspectorEngineSubtitle(
+                                sttAvailable = sttHealth.isSystemSttAvailable,
+                                sttEngineType = sttHealth.activeEngineType,
+                                report = ttsReport
+                            ),
                             fontSize = 11.sp,
                             color = AngelCyanAccent
                         )
@@ -175,8 +249,12 @@ fun MyanmarSttTtsEngineInspectorCard(
                     onClick = {
                         sttManager.ensureHealthyEngineSelected()
                         sttHealth = sttManager.getHealthReport()
+                        // ISSUE-041: the Toast is shown when diagnostics
+                        // COMPLETE, with the actual outcome (see the
+                        // LaunchedEffect on ttsReport below) — not an
+                        // unconditional success claim at click time.
+                        refreshToastPending = true
                         ttsDiagHelper.runDiagnostics()
-                        Toast.makeText(context, "STT/TTS မြန်မာ အင်ဂျင် အခြေအနေကို ပြန်လည်စစ်ဆေးပြီးပါပြီ ✓", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.testTag("refresh_stt_tts_inspector_button")
                 ) {
@@ -461,7 +539,9 @@ fun MyanmarSttTtsEngineInspectorCard(
                         color = AngelTextSecondary
                     )
                     Text(
-                        text = "• Universal Phonetic G2P Fallback: မြန်မာ Voice Pack မရှိသေးသော ဖုန်းများတွင်ပါ Phonetic Syllables ဖြင့် အသံမပျက် တိုက်ရိုက်ထွက်ဆိုပေးသည်",
+                        // ISSUE-041: the removed phonetic G2P fallback is no
+                        // longer advertised; this line reports the live state.
+                        text = "• my-MM Voice: ${inspectorVoiceSummary(ttsReport)}",
                         fontSize = 10.sp,
                         color = AngelTextSecondary
                     )
