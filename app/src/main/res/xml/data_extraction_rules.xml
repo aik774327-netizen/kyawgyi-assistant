@@ -1,19 +1,27 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ISSUE-043: data extraction rules (API 31+, android:dataExtractionRules).
+
+    The same sensitive stores as in backup_rules.xml are excluded from BOTH
+    cloud backup and device-to-device transfer:
+    - kyawgyi_error_learning_memory.xml: error-learning history + blocked
+      method keys (user's command history).
+    - kyaw_gyi_secure_vault_prefs.xml / kyawgyi_keystore_vault.xml:
+      Android-Keystore-wrapped vault material - device-bound by design,
+      useless and unsafe to restore on another device.
+    - ai_angel_v25_db: Room command-log database.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="kyawgyi_error_learning_memory.xml" />
+        <exclude domain="sharedpref" path="kyaw_gyi_secure_vault_prefs.xml" />
+        <exclude domain="sharedpref" path="kyawgyi_keystore_vault.xml" />
+        <exclude domain="database" path="ai_angel_v25_db" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="kyawgyi_error_learning_memory.xml" />
+        <exclude domain="sharedpref" path="kyaw_gyi_secure_vault_prefs.xml" />
+        <exclude domain="sharedpref" path="kyawgyi_keystore_vault.xml" />
+        <exclude domain="database" path="ai_angel_v25_db" />
     </device-transfer>
-    -->
 </data-extraction-rules>

@@ -17,12 +17,17 @@ import com.example.security.KeystoreDatabaseKeyManager
 /**
  * FAILURE MEMORY ENGINE
  *
- * အမှားမှ သင်ယူသော Memory စနစ် (Android Keystore AES-256 Wrapped SQLCipher & Room Database ချိတ်ဆက်ထားသည်):
+ * အမှားမှ သင်ယူသော Memory စနစ် (Room Database ချိတ်ဆက်ထားသည်):
  * ၁။ မအောင်မြင်ခဲ့သော လုပ်ဆောင်ချက်တိုင်းကို Error Log အဖြစ် စနစ်တကျ မှတ်သားသည်။
  * ၂။ အမှားဖြစ်ရသော အကြောင်းရင်းကို (နည်းပညာပိုင်း / အရင်းအမြစ် / လက်တွေ့မကိုက်ညီမှု) အဖြစ် ခွဲခြမ်းစိတ်ဖြာသည်။
  * ၃။ အမှားတစ်ခုတူ ထပ်မံတောင်းဆိုလာပါက "ယခင်က မအောင်မြင်ခဲ့သော လုပ်ဆောင်ချက် ဖြစ်ပါသည်" ဟု သတိပေးသည်။
  * ၄။ မအောင်မြင်ခဲ့သော နည်းလမ်းကို ထပ်မံ အကြံမပေးဘဲ အစားထိုးနည်းလမ်း ပံ့ပိုးသည်။
- * ၅။ Android Keystore ဖြင့် AES-256-GCM Wrapped ပြုလုပ်ထားသော လုံခြုံသည့် SQLCipher Database Passphrase ဖြင့် ဒေတာများကို ကာကွယ်ထားသည်။
+ * ၅။ လုံခြုံရေးအမှန်အခြေအနေ (ISSUE-043 ပြင်ဆင်ချက်): [KeystoreDatabaseKeyManager] သည် Android Keystore
+ *    ဖြင့် AES-256-GCM wrap လုပ်ထားသော passphrase တစ်ခု ထုတ်ပေးနိုင်သော်လည်း Room Database
+ *    (`ai_angel_v25_db`) ကို ထို passphrase ဖြင့် မ encrypt ထားပါ — AppDatabase တွင် SQLCipher
+ *    SupportFactory မရှိပါ။ ထို့ကြောင့် command-log database သည် လက်ရှိတွင် UNENCRYPTED ဖြစ်သည်။
+ *    SQLCipher အမှန်တကယ် ချိတ်ဆက်ခြင်းမှာ data migration လိုအပ်သောကြောင့် သီးခြား approved change
+ *    အဖြစ် ကျန်ရှိသည် (BLOCKED remainder, ISSUE-043)။
  * ၆။ Process Death သို့မဟုတ် စက်ပိတ်ဖွင့်ပြီးနောက်တွင်လည်း Room Database (`command_logs`) မှ အမှားမှတ်တမ်းများကို ပြန်လည်ဆွဲတင်ပေးသည်။
  */
 object FailureMemoryEngine {
@@ -55,7 +60,10 @@ object FailureMemoryEngine {
 
     /**
      * Initializes the FailureMemoryEngine with Application Context and restores previous failures from Room DB.
-     * Guarantees Keystore AES-256 wrapped key is verified and active.
+     * ISSUE-043 correction: this also generates the Keystore-wrapped passphrase via
+     * [KeystoreDatabaseKeyManager], but that passphrase is NOT applied to the Room
+     * database — the database is currently UNENCRYPTED (no SQLCipher factory in
+     * AppDatabase). The wrapped key existing does not mean the data is encrypted.
      */
     fun initialize(context: Context) {
         if (isInitialized && appContext != null) return
@@ -63,7 +71,9 @@ object FailureMemoryEngine {
         appContext = appCtx
         isInitialized = true
 
-        // Verify Keystore hardware-backed encryption key for SQLCipher/Database
+        // Generate/verify the Keystore-wrapped passphrase. NOTE (ISSUE-043):
+        // the passphrase is not wired into Room - the DB stays unencrypted
+        // until a separately approved SQLCipher migration lands.
         try {
             val keyManager = KeystoreDatabaseKeyManager.getInstance(appCtx)
             val passphrase = keyManager.getOrGenerateDatabasePassphrase()
@@ -286,7 +296,11 @@ object FailureMemoryEngine {
     }
 
     /**
-     * Returns security status metadata regarding Keystore wrapped encryption key for SQLCipher/FailureMemoryEngine.
+     * Returns security status metadata for the Keystore wrapped key.
+     * ISSUE-043: the map now states the database's REAL encryption state —
+     * [isDatabaseEncrypted] is false because AppDatabase is built without a
+     * SQLCipher SupportFactory. A wrapped key existing must never be read
+     * as "the database is encrypted".
      */
     fun getKeystoreSecurityStatus(context: Context): Map<String, Any> {
         val keyManager = KeystoreDatabaseKeyManager.getInstance(context)
@@ -295,12 +309,15 @@ object FailureMemoryEngine {
             "provider" to "AndroidKeyStore",
             "isHardwareBacked" to keyManager.isHardwareKeyBacked(),
             "isWrappedKeyConfigured" to true,
-            "passphraseBitLength" to 256
+            "passphraseBitLength" to 256,
+            "isDatabaseEncrypted" to false
         )
     }
 
     /**
-     * Retrieves the decrypted database passphrase from Keystore for encrypted database engines.
+     * Retrieves the Keystore-wrapped database passphrase. ISSUE-043 note:
+     * no production caller passes this to Room today — the command-log
+     * database is unencrypted until the blocked SQLCipher migration lands.
      */
     fun getDatabasePassphrase(context: Context): ByteArray {
         return KeystoreDatabaseKeyManager.getInstance(context).getOrGenerateDatabasePassphrase()

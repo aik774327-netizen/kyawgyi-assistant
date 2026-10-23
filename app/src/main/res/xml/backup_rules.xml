@@ -1,13 +1,22 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ISSUE-043: backup rules for Auto Backup (used on API < 31 via
+    android:fullBackupContent).
+
+    The stores below hold sensitive, device-bound data and must NOT leave
+    the device in a cloud backup:
+    - kyawgyi_error_learning_memory.xml: error-learning history, blocked
+      method keys and evidence notes (user's command history).
+    - kyaw_gyi_secure_vault_prefs.xml / kyawgyi_keystore_vault.xml:
+      Android-Keystore-wrapped vault material for the Gemini API key;
+      wrapped blobs are keyed to THIS device's Keystore and must never be
+      restored onto another device.
+    - ai_angel_v25_db: the Room command-log database (command/failure
+      history).
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="kyawgyi_error_learning_memory.xml" />
+    <exclude domain="sharedpref" path="kyaw_gyi_secure_vault_prefs.xml" />
+    <exclude domain="sharedpref" path="kyawgyi_keystore_vault.xml" />
+    <exclude domain="database" path="ai_angel_v25_db" />
 </full-backup-content>
