@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 import com.kyawgyi.voice.SttEngineManager
 import com.kyawgyi.voice.SttEngineType
+import com.kyawgyi.voice.TtsEngineType
 import com.kyawgyi.voice.VoiceSettings
 import java.util.Locale
 
@@ -42,6 +43,7 @@ fun SttTtsModelAndVoiceSettingsCard(
     val sttEngineManager = remember { SttEngineManager.getInstance(context) }
 
     val preferredEngine by voiceSettings.preferredSttEngineFlow.collectAsState()
+    val preferredTtsEngine by voiceSettings.preferredTtsEngineFlow.collectAsState()
     val ttsSpeechRate by voiceSettings.ttsSpeechRateFlow.collectAsState()
     val ttsPitch by voiceSettings.ttsPitchFlow.collectAsState()
     val isAecHangoverEnabled by voiceSettings.isAecHangoverEnabledFlow.collectAsState()
@@ -103,7 +105,13 @@ fun SttTtsModelAndVoiceSettingsCard(
                             color = Color.White
                         )
                         Text(
-                            text = "System ASR • AEC Echo Guard • Local TTS",
+                            text = "${when (preferredEngine) {
+                                SttEngineType.SYSTEM_ON_DEVICE -> "System ASR"
+                                SttEngineType.GEMINI_ONLINE -> "Gemini Online STT"
+                            }} • AEC Echo Guard • ${when (preferredTtsEngine) {
+                                TtsEngineType.SYSTEM -> "System TTS"
+                                TtsEngineType.GEMINI_ONLINE -> "Gemini Online TTS"
+                            }}",
                             fontSize = 11.sp,
                             color = AngelNeonGreen
                         )
@@ -346,6 +354,80 @@ fun SttTtsModelAndVoiceSettingsCard(
                     ),
                     modifier = Modifier.testTag("voice_settings_pitch_slider")
                 )
+            }
+
+            // 4b. Preferred TTS Engine Selection (System vs Gemini Online)
+            Text(
+                text = "အသံထွက် အင်ဂျင် ရွေးချယ်ရန် (Preferred TTS Engine):",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                TtsEngineType.entries.forEach { engineType ->
+                    val isSelected = preferredTtsEngine == engineType
+                    val label = when (engineType) {
+                        TtsEngineType.SYSTEM -> "System TTS"
+                        TtsEngineType.GEMINI_ONLINE -> "Gemini Online"
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) AngelNeonGreen else AngelSurfaceDark,
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSelected) AngelNeonGreen else Color.White.copy(alpha = 0.12f)
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                voiceSettings.preferredTtsEngine = engineType
+                            }
+                            .testTag("select_tts_engine_${engineType.name.lowercase(Locale.ROOT)}")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Color.Black else Color.White
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 4c. Gemini Online TTS disclosure — shown only when the
+            // online engine is selected (reply text leaves the device).
+            if (preferredTtsEngine == TtsEngineType.GEMINI_ONLINE) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = AngelSurfaceDark,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("gemini_online_tts_disclosure")
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Gemini Online TTS အသုံးပြုနေသည်",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "အဖြေစာသားကို အသံအဖြစ် ပြောင်းရန် Google ဆာဗာသို့ ပို့ပေးပါမည်။ အင်တာနက်နှင့် Settings တွင် ထည့်ထားသော Gemini API key လိုအပ်ပါသည်။ API key မရှိပါက သို့မဟုတ် ချိတ်ဆက်၍ မရပါက အမှားအကြောင်းရင်းကို အတိအကျပြပြီး System TTS သို့ ပြောင်းပေးပါမည်။",
+                            fontSize = 11.sp,
+                            color = AngelTextSecondary
+                        )
+                    }
+                }
             }
 
             // 5. Toggles: AEC 250ms Echo Guard, Local TTS Fallback

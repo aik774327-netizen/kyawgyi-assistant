@@ -25,6 +25,7 @@ class VoiceSettings private constructor(context: Context) {
         private const val PREFS_NAME = "kyawgyi_voice_preferences"
 
         private const val KEY_PREFERRED_STT_ENGINE = "preferred_stt_engine"
+        private const val KEY_PREFERRED_TTS_ENGINE = "preferred_tts_engine"
         private const val KEY_TTS_SPEECH_RATE = "tts_speech_rate"
         private const val KEY_TTS_PITCH = "tts_pitch"
         private const val KEY_AUTO_DOWNLOAD_MODELS = "auto_download_models"
@@ -52,6 +53,19 @@ class VoiceSettings private constructor(context: Context) {
             _preferredSttEngine.value = value
             prefs.edit().putString(KEY_PREFERRED_STT_ENGINE, value.name).apply()
             Log.i(TAG, "Preferred STT Engine updated to: $value")
+        }
+
+    // 1b. Preferred TTS Engine (§7, 2026-10-23): system TTS vs Gemini
+    // online TTS. Default SYSTEM — online synthesis sends reply text
+    // to Google and must be an explicit user choice.
+    private val _preferredTtsEngine = MutableStateFlow(loadPreferredTtsEngine())
+    val preferredTtsEngineFlow: StateFlow<TtsEngineType> = _preferredTtsEngine.asStateFlow()
+    var preferredTtsEngine: TtsEngineType
+        get() = _preferredTtsEngine.value
+        set(value) {
+            _preferredTtsEngine.value = value
+            prefs.edit().putString(KEY_PREFERRED_TTS_ENGINE, value.name).apply()
+            Log.i(TAG, "Preferred TTS Engine updated to: $value")
         }
 
     // 2. TTS Speech Rate
@@ -117,8 +131,18 @@ class VoiceSettings private constructor(context: Context) {
         }
     }
 
+    private fun loadPreferredTtsEngine(): TtsEngineType {
+        val saved = prefs.getString(KEY_PREFERRED_TTS_ENGINE, TtsEngineType.SYSTEM.name)
+        return try {
+            TtsEngineType.valueOf(saved ?: TtsEngineType.SYSTEM.name)
+        } catch (e: Exception) {
+            TtsEngineType.SYSTEM
+        }
+    }
+
     fun resetToDefaults() {
         preferredSttEngine = SttEngineType.SYSTEM_ON_DEVICE
+        preferredTtsEngine = TtsEngineType.SYSTEM
         ttsSpeechRate = 1.0f
         ttsPitch = 1.0f
         autoDownloadModels = true

@@ -5,9 +5,19 @@ import android.content.Intent
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import com.example.data.GeminiApiService
 import com.example.engine.KyawGyiAudioManager
 import com.example.nlu.BurmeseTtsTextNormalizer
 import com.kyawgyi.voice.AudioFocusAndAecManager
+import com.kyawgyi.voice.AudioTrackPcmPlayer
+import com.kyawgyi.voice.GeminiTtsEngine
+import com.kyawgyi.voice.TtsEngineType
+import com.kyawgyi.voice.VoiceSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.Queue
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -113,6 +123,66 @@ class MyanmarTTSEngine(
     @Volatile
     private var isSpeaking: Boolean = false
     private val queue: Queue<Pair<String, (() -> Unit)?>> = ConcurrentLinkedQueue()
+
+    // §7 (2026-10-23): Gemini online TTS routing. Created lazily on
+    // first online utterance so the default SYSTEM selection has zero
+    // new footprint. The engine's fallback is null ON PURPOSE: the
+    // fallback for an online failure is THIS class's system path
+    // (speakViaSystem, with the FIX-02 voice gate) — routing handles
+    // it, so Burmese text is never fed to an ungated foreign voice.
+    private val onlineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    @Volatile
+    private var geminiTtsEngineOrNull: GeminiTtsEngine? = null
+
+    private fun currentTtsEngineSelection(): TtsEngineType =
+        try {
+            VoiceSettings.getInstance(context).preferredTtsEngine
+        } catch (e: Exception) {
+            TtsEngineType.SYSTEM
+        }
+
+    private fun geminiTtsEngine(): GeminiTtsEngine {
+        geminiTtsEngineOrNull?.let { return it }
+        val service = GeminiApiService(context)
+        return GeminiTtsEngine(
+            synthesize = { text, voice -> service.synthesizeSpeech(text, voice) },
+            player = AudioTrackPcmPlayer(context),
+            fallback = null,
+            onError = { message ->
+                // Surface the classified failure where the UI already
+                // shows TTS status; never claim the utterance spoke.
+                ttsStatusNotice = message
+                Log.w(TAG, "Gemini online TTS unavailable: $message")
+            },
+            // speak() input has already been through preprocessText()
+            // (which includes BurmeseTtsTextNormalizer) — do not
+            // normalize a second time.
+            textNormalizer = { it }
+        ).also { geminiTtsEngineOrNull = it }
+    }
+
+    /**
+     * §7: online-first utterance. On ANY online failure (already
+     * surfaced via the engine's onError) the utterance falls back to
+     * the system path; on success the completion callback fires here.
+     */
+    private fun speakOnlineFirst(cleanText: String, onEndCallback: (() -> Unit)?) {
+        val engine = geminiTtsEngine()
+        onlineScope.launch {
+            val spokenOnline = try {
+                engine.speak(cleanText)
+                true
+            } catch (e: Exception) {
+                false
+            }
+            if (spokenOnline) {
+                onEndCallback?.invoke()
+            } else {
+                speakViaSystem(cleanText, onEndCallback)
+            }
+        }
+    }
 
     init {
         initVoice()
@@ -246,6 +316,20 @@ class MyanmarTTSEngine(
             return
         }
 
+        // §7 (2026-10-23): when the user has selected Gemini online
+        // TTS, try it first; any failure (surfaced by the engine's
+        // onError) falls back to the system path below for this
+        // utterance. Default selection is SYSTEM — unchanged behavior.
+        if (currentTtsEngineSelection() == TtsEngineType.GEMINI_ONLINE) {
+            speakOnlineFirst(cleanText, onEndCallback)
+            return
+        }
+
+        speakViaSystem(cleanText, onEndCallback)
+    }
+
+    @Synchronized
+    private fun speakViaSystem(cleanText: String, onEndCallback: (() -> Unit)?) {
         // FIX-02 (device defect B2 — robotic Burmese voice): the old
         // phonetic fallback transliterated Burmese into Latin phonetics
         // and read it with a US English voice whenever the my-MM voice
@@ -325,6 +409,7 @@ class MyanmarTTSEngine(
 
     @Synchronized
     fun stop() {
+        geminiTtsEngineOrNull?.stop()
         while (queue.isNotEmpty()) {
             queue.poll()?.second?.invoke()
         }
@@ -343,6 +428,9 @@ class MyanmarTTSEngine(
 
     fun shutdown() {
         stop()
+        geminiTtsEngineOrNull?.close()
+        geminiTtsEngineOrNull = null
+        onlineScope.cancel()
         tts?.shutdown()
         tts = null
         isReady = false

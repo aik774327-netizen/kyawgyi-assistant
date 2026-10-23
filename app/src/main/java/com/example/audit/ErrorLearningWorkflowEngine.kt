@@ -16,6 +16,8 @@ import com.example.data.CommandLogEntity
 import com.example.discovery.AppNameMatcher
 import com.example.discovery.DynamicPackageDiscovery
 import com.example.utils.AndroidTtsProbe
+import com.example.utils.GeminiApiTtsProbe
+import com.example.utils.GeminiTtsProbe
 import com.example.utils.MyanmarTTSVoicePackManager
 import com.example.utils.TtsConditionVerifier
 import com.example.utils.TtsProbe
@@ -440,6 +442,15 @@ object ErrorLearningWorkflowEngine {
      */
     @Volatile
     internal var ttsProbeFactoryForTesting: ((Context) -> TtsProbe)? = null
+
+    /**
+     * §7 (2026-10-23): injectable Gemini online TTS probe factory,
+     * counterpart of [ttsProbeFactoryForTesting] for the online
+     * engine's verifier branch. Null in production, where
+     * [GeminiApiTtsProbe] is used.
+     */
+    @Volatile
+    internal var geminiTtsProbeFactoryForTesting: ((Context) -> GeminiTtsProbe)? = null
 
     /**
      * ISSUE-039: injectable package-launchable checker for tests. Null in
@@ -924,6 +935,25 @@ object ErrorLearningWorkflowEngine {
         if (cached != null && now - cached.cachedAtMs < TTS_VERIFICATION_CACHE_TTL_MS) {
             return cached.result
         }
+        // §7 (2026-10-23): when the user has selected Gemini online
+        // TTS, the live condition that can clear a TTS record is the
+        // ONLINE path — verifying the system-TTS engine instead would
+        // describe an engine the user is not using.
+        val ttsSelection = try {
+            com.kyawgyi.voice.VoiceSettings.getInstance(context).preferredTtsEngine
+        } catch (e: Exception) {
+            com.kyawgyi.voice.TtsEngineType.SYSTEM
+        }
+        if (ttsSelection == com.kyawgyi.voice.TtsEngineType.GEMINI_ONLINE) {
+            val geminiProbe = geminiTtsProbeFactoryForTesting?.invoke(context)
+                ?: GeminiApiTtsProbe(context)
+            val geminiResult = TtsConditionVerifier.verifyGeminiOnline(
+                previousLog.errorId, previousLog.commandKey, geminiProbe, now
+            )
+            ttsVerificationCache[cacheKey] = CachedVerification(geminiResult, now)
+            return geminiResult
+        }
+
         val probe = ttsProbeFactoryForTesting?.invoke(context)
             ?: AndroidTtsProbe(
                 context,
@@ -1134,6 +1164,7 @@ object ErrorLearningWorkflowEngine {
         failedMethodMemory.clear()
         ttsVerificationCache.clear()
         ttsProbeFactoryForTesting = null
+        geminiTtsProbeFactoryForTesting = null
         packageLaunchableCheckerForTesting = null
         prefs?.edit()?.clear()?.commit()
         publishStateFlows()

@@ -6,6 +6,11 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import com.example.audit.VerificationOutcome
 import com.example.audit.VerificationResult
+import com.example.data.GeminiApiService
+import com.example.data.GeminiFailureClass
+import com.example.data.GeminiFailureClassifier
+import com.example.security.api.ApiKeyQuotaManager
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -214,9 +219,54 @@ class AndroidTtsProbe(
     }
 }
 
+/**
+ * §7 (2026-10-23) — probe seam for the Gemini ONLINE TTS path, the
+ * counterpart of [TtsProbe] for the system engine. What this probe can
+ * honestly check: (1) a usable API key exists in the shared pool;
+ * (2) a real synthesis request is accepted and returns PCM audio
+ * bytes. It CANNOT check that sound was audible on the device —
+ * [TtsConditionVerifier.verifyGeminiOnline] therefore always keeps
+ * the AUDIO_OUTPUT_NOT_VERIFIED limitation in its result detail.
+ */
+interface GeminiTtsProbe {
+    fun hasConfiguredKey(): Boolean
+
+    /** Runs one real synthesis probe; returns the PCM byte count. Throws the typed Gemini failure on error. */
+    fun synthesizeProbePcmBytes(): Int
+
+    fun shutdown() {}
+}
+
+/** Production [GeminiTtsProbe] backed by the real pool + service. Blocking — call off the main thread. */
+class GeminiApiTtsProbe(context: Context) : GeminiTtsProbe {
+
+    private val appContext: Context = context.applicationContext
+
+    override fun hasConfiguredKey(): Boolean {
+        return try {
+            val manager = ApiKeyQuotaManager.getInstance(appContext) ?: return false
+            runBlocking { manager.getActiveApiKey() } != null
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override fun synthesizeProbePcmBytes(): Int {
+        val service = GeminiApiService(appContext)
+        val pcm = runBlocking {
+            service.synthesizeSpeech(
+                AndroidTtsProbe.PROBE_TEXT,
+                GeminiApiService.DEFAULT_TTS_VOICE_NAME
+            )
+        }
+        return pcm.size
+    }
+}
+
 object TtsConditionVerifier {
 
     const val EVIDENCE_SOURCE = "TTS_LIVE_PROBE"
+    const val GEMINI_EVIDENCE_SOURCE = "GEMINI_TTS_LIVE_PROBE"
 
     /**
      * Runs the staged verification. [probe] is always shut down before return.
@@ -317,19 +367,112 @@ object TtsConditionVerifier {
         }
     }
 
+    /**
+     * §7 — staged verification of the Gemini ONLINE TTS path (used
+     * when the user has selected the online engine; the system-TTS
+     * probe above would be verifying the wrong engine). Stages:
+     *   1. KEY_PRESENT — the shared pool holds a usable API key.
+     *   2. SYNTH_REQUEST_ACCEPTED — a real synthesizeSpeech probe
+     *      returns PCM audio bytes.
+     * Even on success the detail carries AUDIO_OUTPUT_NOT_VERIFIED:
+     * returned PCM proves the service synthesized audio; it does not
+     * prove audible playback happened on this device.
+     */
+    fun verifyGeminiOnline(
+        errorId: String,
+        commandKey: String,
+        probe: GeminiTtsProbe,
+        nowMs: Long = System.currentTimeMillis()
+    ): VerificationResult {
+        val stages = mutableListOf<String>()
+        try {
+            if (!probe.hasConfiguredKey()) {
+                stages += "KEY_PRESENT_FAILED (no usable Gemini API key in the pool)"
+                return result(
+                    VerificationOutcome.BLOCKED, errorId, commandKey, nowMs,
+                    "Gemini online TTS is selected but no API key is configured — " +
+                        GeminiApiService.NO_API_KEY_MESSAGE,
+                    stages, GEMINI_EVIDENCE_SOURCE
+                )
+            }
+            stages += "KEY_PRESENT"
+
+            val pcmBytes = try {
+                probe.synthesizeProbePcmBytes()
+            } catch (e: Exception) {
+                if (GeminiApiService.isNoApiKeyException(e)) {
+                    stages += "KEY_PRESENT_FAILED (pool emptied during probe)"
+                    return result(
+                        VerificationOutcome.BLOCKED, errorId, commandKey, nowMs,
+                        GeminiFailureClassifier.userMessageForThrowable(e),
+                        stages, GEMINI_EVIDENCE_SOURCE
+                    )
+                }
+                val failureClass = GeminiFailureClassifier.classify(e)
+                val message = GeminiFailureClassifier.userMessageForThrowable(e)
+                return when (failureClass) {
+                    GeminiFailureClass.NETWORK_TIMEOUT,
+                    GeminiFailureClass.NETWORK_UNREACHABLE -> {
+                        stages += "SYNTH_PROBE_UNREACHABLE ($failureClass)"
+                        result(
+                            VerificationOutcome.UNVERIFIED, errorId, commandKey, nowMs,
+                            "The Gemini TTS probe could not reach the service ($message); " +
+                                "a transient network state can neither prove nor clear the recorded failure.",
+                            stages, GEMINI_EVIDENCE_SOURCE
+                        )
+                    }
+                    else -> {
+                        stages += "SYNTH_REQUEST_FAILED ($failureClass)"
+                        result(
+                            VerificationOutcome.FAILED, errorId, commandKey, nowMs,
+                            "Gemini online TTS probe failed: $message",
+                            stages, GEMINI_EVIDENCE_SOURCE
+                        )
+                    }
+                }
+            }
+
+            if (pcmBytes <= 0) {
+                stages += "SYNTH_REQUEST_FAILED (EMPTY_RESPONSE)"
+                return result(
+                    VerificationOutcome.FAILED, errorId, commandKey, nowMs,
+                    "Gemini online TTS probe returned no audio bytes (empty response).",
+                    stages, GEMINI_EVIDENCE_SOURCE
+                )
+            }
+            stages += "SYNTH_REQUEST_ACCEPTED"
+            stages += "PCM_AUDIO_RECEIVED ($pcmBytes bytes, 24 kHz PCM16)"
+            return result(
+                VerificationOutcome.VERIFIED, errorId, commandKey, nowMs,
+                "Gemini online TTS probe succeeded: a usable API key is configured and the service " +
+                    "returned $pcmBytes bytes of PCM audio for the probe utterance. " +
+                    "AUDIO_OUTPUT_NOT_VERIFIED: returned audio data proves synthesis succeeded; " +
+                    "whether sound is audible on this device (speaker/AudioTrack path) cannot be proven programmatically.",
+                stages, GEMINI_EVIDENCE_SOURCE
+            )
+        } finally {
+            try {
+                probe.shutdown()
+            } catch (e: Exception) {
+                Log.w("TtsConditionVerifier", "Gemini probe shutdown failed: ${e.message}")
+            }
+        }
+    }
+
     private fun result(
         outcome: VerificationOutcome,
         errorId: String,
         commandKey: String,
         nowMs: Long,
         detail: String,
-        stages: List<String>
+        stages: List<String>,
+        evidenceSource: String = EVIDENCE_SOURCE
     ): VerificationResult = VerificationResult(
         outcome = outcome,
         errorId = errorId,
         commandKey = commandKey,
         checkedAtMs = nowMs,
-        evidenceSource = EVIDENCE_SOURCE,
+        evidenceSource = evidenceSource,
         detail = detail,
         stages = stages.toList()
     )
