@@ -10,6 +10,7 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.BuildConfig
 import com.example.data.AppDatabase
 import com.example.data.CommandLogEntity
 import com.example.discovery.AppNameMatcher
@@ -43,7 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * - Item 13: Never deletes historical failures on resolution; transitions status:
  *   FAILED -> BLOCKED -> CONDITION_CHANGED -> RETRY_ALLOWED -> VERIFIED_SUCCESS -> RESOLVED.
  * - Item 14: Structured FailureFingerprint (intent, parameters, package, Android SDK, device, permissions, model, env).
- * - Item 15: 95-Type Error Taxonomy + explicit UNKNOWN ("CAUSE = UNKNOWN") when evidence is insufficient.
+ * - Item 15: 41-Type Error Taxonomy (entry ids run up to #95) + explicit UNKNOWN ("CAUSE = UNKNOWN") when evidence is insufficient.
  * - Item 16: Room (`AppDatabase.commandLogDao()`) synchronized as persistent source of truth.
  * - Item 17: Explicit ErrorRecoveryPolicy (RETRY_NOW, RETRY_LATER, WAIT_FOR_CONDITION, ASK_USER, SAFE_FAIL, UNSUPPORTED).
  * - Item 19: Automatic PII / Sensitive Data Redaction prior to persistence.
@@ -187,8 +188,11 @@ object ErrorLearningWorkflowEngine {
         val androidSdkInt: Int = Build.VERSION.SDK_INT,
         val deviceModel: String = "${Build.MANUFACTURER}:${Build.MODEL}",
         val permissionState: String = "UNKNOWN",
-        val modelVersion: String = "sherpa-onnx-2024",
-        val appVersion: String = "1.0.0",
+        // ISSUE-044: truthful defaults — no offline STT model exists in
+        // this app (Sherpa/Vosk tiers were removed), and the app version
+        // comes from the build, not a hard-coded literal.
+        val modelVersion: String = "unknown",
+        val appVersion: String = BuildConfig.VERSION_NAME,
         val environmentState: String = "DEFAULT"
     ) {
         fun toCompositeHash(): String {
@@ -219,8 +223,8 @@ object ErrorLearningWorkflowEngine {
                     androidSdkInt = obj.optInt("androidSdkInt", Build.VERSION.SDK_INT),
                     deviceModel = obj.optString("deviceModel", "${Build.MANUFACTURER}:${Build.MODEL}"),
                     permissionState = obj.optString("permissionState", "UNKNOWN"),
-                    modelVersion = obj.optString("modelVersion", "sherpa-onnx-2024"),
-                    appVersion = obj.optString("appVersion", "1.0.0"),
+                    modelVersion = obj.optString("modelVersion", "unknown"),
+                    appVersion = obj.optString("appVersion", BuildConfig.VERSION_NAME),
                     environmentState = obj.optString("environmentState", "DEFAULT")
                 )
             }
@@ -562,8 +566,10 @@ object ErrorLearningWorkflowEngine {
         attemptedMethod: String,
         evidence: String,
         exception: Throwable? = null,
-        recoveryAttempt: String = "Switched to verified alternative fallback flow",
-        recoveryResult: String = "Alternative path ready; failed method blocked from blind reuse",
+        // ISSUE-044: defaults must not claim a recovery that never happened.
+        // Callers that genuinely performed a recovery pass their own text.
+        recoveryAttempt: String = "No recovery attempted",
+        recoveryResult: String = "No recovery attempted; failed method blocked pending verification",
         verificationStatus: String = "Not verified (Action failed; recorded truthfully without fabrication)",
         intent: String = "UNKNOWN",
         targetPackage: String = "system",
@@ -669,7 +675,9 @@ object ErrorLearningWorkflowEngine {
             verificationStatus = verificationStatus,
             simpleExplanation = simpleEn,
             simpleExplanationMm = simpleMm,
-            confidence = if (taxonomy == ErrorTaxonomy.UNKNOWN) 0.0f else 0.92f,
+            // ISSUE-044: default confidence is a neutral 0.5 — 0.92 implied
+            // near-certainty about records nobody had verified.
+            confidence = if (taxonomy == ErrorTaxonomy.UNKNOWN) 0.0f else 0.5f,
             recoverability = recoveryPolicy != ErrorRecoveryPolicy.UNSUPPORTED,
             retryPolicy = recoveryPolicy,
             environmentFingerprint = fingerprint,
