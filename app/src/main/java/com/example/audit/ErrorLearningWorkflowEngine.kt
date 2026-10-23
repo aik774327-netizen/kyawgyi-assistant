@@ -12,6 +12,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.AppDatabase
 import com.example.data.CommandLogEntity
+import com.example.discovery.AppNameMatcher
+import com.example.discovery.DynamicPackageDiscovery
 import com.example.utils.AndroidTtsProbe
 import com.example.utils.MyanmarTTSVoicePackManager
 import com.example.utils.TtsConditionVerifier
@@ -94,6 +96,19 @@ object ErrorLearningWorkflowEngine {
         RETRY_ALLOWED,
         VERIFIED_SUCCESS,
         RESOLVED
+    }
+
+    /**
+     * ISSUE-039 — the kind of resource a RESOURCE_UNAVAILABLE record is
+     * about. The Live Condition Verifier dispatches on this tag instead of
+     * checking one hard-coded resource (offline STT model files) for every
+     * resource failure.
+     */
+    enum class ResourceKind {
+        TTS_VOICE,
+        PACKAGE,
+        MODEL_FILE,
+        OTHER
     }
 
     /**
@@ -246,7 +261,9 @@ object ErrorLearningWorkflowEngine {
         // ISSUE-035 — canonical structured evidence stored verbatim at record time
         val errorCode: String = "",
         val exceptionClass: String = ORIGINAL_EXCEPTION_UNAVAILABLE,
-        val exceptionMessage: String = ""
+        val exceptionMessage: String = "",
+        // ISSUE-039 — recorded resource kind for verifier dispatch
+        val resourceKind: String = "OTHER"
     ) {
         fun toFormattedReport(): String {
             return buildString {
@@ -312,6 +329,7 @@ object ErrorLearningWorkflowEngine {
                 put("errorCode", errorCode)
                 put("exceptionClass", exceptionClass)
                 put("exceptionMessage", exceptionMessage)
+                put("resourceKind", resourceKind)
             }
         }
 
@@ -387,7 +405,8 @@ object ErrorLearningWorkflowEngine {
                     statusTransitionHistory = historyList,
                     errorCode = obj.optString("errorCode", ""),
                     exceptionClass = obj.optString("exceptionClass", ORIGINAL_EXCEPTION_UNAVAILABLE),
-                    exceptionMessage = obj.optString("exceptionMessage", "")
+                    exceptionMessage = obj.optString("exceptionMessage", ""),
+                    resourceKind = obj.optString("resourceKind", "OTHER")
                 )
             }
         }
@@ -417,6 +436,13 @@ object ErrorLearningWorkflowEngine {
      */
     @Volatile
     internal var ttsProbeFactoryForTesting: ((Context) -> TtsProbe)? = null
+
+    /**
+     * ISSUE-039: injectable package-launchable checker for tests. Null in
+     * production, where PackageManager + AppNameMatcher are used.
+     */
+    @Volatile
+    internal var packageLaunchableCheckerForTesting: ((Context, ErrorLogEntry) -> Boolean)? = null
 
     /**
      * ISSUE-033: short-lived cache of TTS verification results per command key,
@@ -541,7 +567,8 @@ object ErrorLearningWorkflowEngine {
         verificationStatus: String = "Not verified (Action failed; recorded truthfully without fabrication)",
         intent: String = "UNKNOWN",
         targetPackage: String = "system",
-        errorCode: String? = null
+        errorCode: String? = null,
+        resourceKind: ResourceKind? = null
     ): ErrorLogEntry {
         val now = System.currentTimeMillis()
         val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(now))
@@ -655,7 +682,8 @@ object ErrorLearningWorkflowEngine {
             exceptionClass = exception?.javaClass?.name ?: ORIGINAL_EXCEPTION_UNAVAILABLE,
             exceptionMessage = exception?.message?.let {
                 SensitiveDataRedactor.redactForAuditLog(it).take(300)
-            } ?: ""
+            } ?: "",
+            resourceKind = (resourceKind ?: deriveResourceKind(normKey, resolvedErrorCode, taxonomy)).name
         )
 
         errorLogHistory.add(entry)
@@ -804,6 +832,13 @@ object ErrorLearningWorkflowEngine {
                 return verifyTtsCondition(context, previousLog)
             }
 
+            // ISSUE-039: RESOURCE records dispatch on the recorded resource
+            // kind — the verifier checks the resource that actually failed,
+            // not one hard-coded resource for every record.
+            if (previousLog.errorType == ErrorTaxonomy.RESOURCE_UNAVAILABLE_ERROR) {
+                return verifyResourceByKind(context, previousLog)
+            }
+
             val evidence: Pair<String, String>? = when (previousLog.errorType) {
                 ErrorTaxonomy.NETWORK_REALITY_ERROR -> {
                     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -850,13 +885,6 @@ object ErrorLearningWorkflowEngine {
                     } else null
                 }
 
-                ErrorTaxonomy.RESOURCE_UNAVAILABLE_ERROR -> {
-                    val modelManager = ModelManager(context)
-                    if (modelManager.isSherpaOnnxModelAvailable() || modelManager.isVoskModelAvailable()) {
-                        "MODEL_MANAGER_FILES" to "Verified via ModelManager: Offline speech model files are now present on disk."
-                    } else null
-                }
-
                 else -> null
             }
             evidence?.let { (source, detail) ->
@@ -898,6 +926,80 @@ object ErrorLearningWorkflowEngine {
         val result = TtsConditionVerifier.verify(previousLog.errorId, previousLog.commandKey, probe, now)
         ttsVerificationCache[cacheKey] = CachedVerification(result, now)
         return result
+    }
+
+    /**
+     * ISSUE-039 — RESOURCE_UNAVAILABLE verification dispatched by the
+     * recorded resource kind:
+     * - TTS_VOICE  -> the staged TTS probe (ISSUE-033)
+     * - PACKAGE    -> PackageManager launch-intent resolution for the
+     *   recorded package, or AppNameMatcher resolution of the recorded
+     *   target against the device's launchable apps
+     * - MODEL_FILE -> the pre-existing ModelManager on-disk check
+     * - OTHER      -> no branch (null -> caller reports UNVERIFIED)
+     */
+    private fun verifyResourceByKind(context: Context, previousLog: ErrorLogEntry): VerificationResult? {
+        return when (resourceKindOf(previousLog)) {
+            ResourceKind.TTS_VOICE -> verifyTtsCondition(context, previousLog)
+            ResourceKind.PACKAGE -> {
+                val launchable = packageLaunchableCheckerForTesting?.invoke(context, previousLog)
+                    ?: isRecordedTargetLaunchable(context, previousLog)
+                if (launchable) {
+                    VerificationResult(
+                        outcome = VerificationOutcome.VERIFIED,
+                        errorId = previousLog.errorId,
+                        commandKey = previousLog.commandKey,
+                        checkedAtMs = System.currentTimeMillis(),
+                        evidenceSource = "PACKAGE_RESOLVER",
+                        detail = "Verified via PackageManager/AppNameMatcher: the recorded target now resolves to a launchable installed app."
+                    )
+                } else null
+            }
+            ResourceKind.MODEL_FILE -> {
+                val modelManager = ModelManager(context)
+                if (modelManager.isSherpaOnnxModelAvailable() || modelManager.isVoskModelAvailable()) {
+                    VerificationResult(
+                        outcome = VerificationOutcome.VERIFIED,
+                        errorId = previousLog.errorId,
+                        commandKey = previousLog.commandKey,
+                        checkedAtMs = System.currentTimeMillis(),
+                        evidenceSource = "MODEL_MANAGER_FILES",
+                        detail = "Verified via ModelManager: Offline speech model files are now present on disk."
+                    )
+                } else null
+            }
+            ResourceKind.OTHER -> null
+        }
+    }
+
+    /** ISSUE-039 — real PACKAGE check behind [verifyResourceByKind]. */
+    private fun isRecordedTargetLaunchable(context: Context, entry: ErrorLogEntry): Boolean {
+        val pm = context.packageManager
+        val pkg = entry.environmentFingerprint.targetPackage
+        if (pkg.contains(".")) {
+            try {
+                if (pm.getLaunchIntentForPackage(pkg) != null) return true
+            } catch (e: Exception) {
+                Log.w(TAG, "Package launch-intent check failed for $pkg: ${e.message}")
+            }
+        }
+        val target = if (entry.commandKey.startsWith(FailedMethodKeys.PREFIX)) {
+            entry.commandKey.split("|").getOrNull(2) ?: ""
+        } else {
+            ""
+        }
+        if (target.isBlank()) return false
+        val apps = try {
+            kotlinx.coroutines.runBlocking {
+                DynamicPackageDiscovery.getInstance(context).getAllLaunchableApps()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Launchable-app discovery failed: ${e.message}")
+            emptyList()
+        }
+        if (apps.isEmpty()) return false
+        val top = AppNameMatcher().scoreCandidates(target, apps).firstOrNull() ?: return false
+        return top.app.isLaunchable && top.score.confidence >= AppNameMatcher.MINIMUM_ACCEPTABLE_SCORE
     }
 
     /**
@@ -1024,11 +1126,42 @@ object ErrorLearningWorkflowEngine {
         failedMethodMemory.clear()
         ttsVerificationCache.clear()
         ttsProbeFactoryForTesting = null
+        packageLaunchableCheckerForTesting = null
         prefs?.edit()?.clear()?.commit()
         publishStateFlows()
     }
 
     private fun normalizeKey(raw: String): String = raw.trim().lowercase(Locale.ROOT)
+
+    /**
+     * ISSUE-039 — derives the resource kind for a record from its canonical
+     * key / structured code / taxonomy. Used at record time when the caller
+     * does not tag the kind explicitly, and as a fallback for entries stored
+     * by older builds (which carry no kind tag).
+     */
+    private fun deriveResourceKind(normKey: String, errorCode: String, taxonomy: ErrorTaxonomy): ResourceKind {
+        return when {
+            normKey.contains("tts_synthesis") || normKey.contains("speak_burmese") ->
+                ResourceKind.TTS_VOICE
+            errorCode in LAUNCHER_RESOURCE_CODES || errorCode in LAUNCHER_INTENT_CODES ||
+                normKey.contains("app_launch") ->
+                ResourceKind.PACKAGE
+            taxonomy == ErrorTaxonomy.RESOURCE_UNAVAILABLE_ERROR ->
+                ResourceKind.MODEL_FILE
+            else -> ResourceKind.OTHER
+        }
+    }
+
+    /** ISSUE-039 — the effective resource kind of a stored entry. */
+    private fun resourceKindOf(entry: ErrorLogEntry): ResourceKind {
+        val stored = try {
+            ResourceKind.valueOf(entry.resourceKind)
+        } catch (e: Exception) {
+            ResourceKind.OTHER
+        }
+        if (stored != ResourceKind.OTHER) return stored
+        return deriveResourceKind(entry.commandKey, entry.errorCode, entry.errorType)
+    }
 
     /**
      * ISSUE-035 — extracts a canonical structured error code from raw evidence

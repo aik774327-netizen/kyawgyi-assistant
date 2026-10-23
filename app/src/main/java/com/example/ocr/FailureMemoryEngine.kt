@@ -154,7 +154,13 @@ object FailureMemoryEngine {
                 evidence = technicalDetails,
                 recoveryAttempt = suggestedRemediationMm,
                 recoveryResult = "NOT_EXECUTED",
-                exception = exception
+                exception = exception,
+                // ISSUE-039: tag the recorded resource kind for verifier dispatch
+                resourceKind = when (component) {
+                    "TTS_SYNTHESIS" -> com.example.audit.ErrorLearningWorkflowEngine.ResourceKind.TTS_VOICE
+                    "APP_LAUNCH" -> com.example.audit.ErrorLearningWorkflowEngine.ResourceKind.PACKAGE
+                    else -> null
+                }
             ).errorId
         } catch (e: Exception) {
             Log.w(TAG, "ErrorLearningWorkflowEngine sync note: ${e.message}")
