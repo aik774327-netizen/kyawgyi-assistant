@@ -58,6 +58,11 @@ internal fun inspectorEngineSubtitle(
     val sttPart = when (sttEngineType) {
         SttEngineType.SYSTEM_ON_DEVICE ->
             if (sttAvailable) "System STT (on-device)" else "System STT (unavailable)"
+        SttEngineType.GEMINI_ONLINE ->
+            // Availability of the online engine can only be proven by a
+            // live call (key + network); the subtitle states its
+            // requirements instead of claiming it is ready.
+            "Gemini Online STT (internet + API key လိုအပ်သည်)"
     }
     val engineSuffix = report.currentEnginePackage.takeIf { it.isNotBlank() }?.let { " [$it]" } ?: ""
     val ttsPart = when (report.status) {

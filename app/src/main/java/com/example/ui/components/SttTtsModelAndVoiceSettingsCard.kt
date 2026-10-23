@@ -227,6 +227,7 @@ fun SttTtsModelAndVoiceSettingsCard(
                     val isSelected = preferredEngine == engineType
                     val label = when (engineType) {
                         SttEngineType.SYSTEM_ON_DEVICE -> "System ASR"
+                        SttEngineType.GEMINI_ONLINE -> "Gemini Online"
                     }
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -254,6 +255,34 @@ fun SttTtsModelAndVoiceSettingsCard(
                                 color = if (isSelected) Color.Black else Color.White
                             )
                         }
+                    }
+                }
+            }
+
+            // 3b. Gemini Online STT disclosure — shown only when the
+            // online engine is selected, so the user always knows when
+            // their voice audio leaves the device (§7 privacy rule).
+            if (preferredEngine == SttEngineType.GEMINI_ONLINE) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = AngelSurfaceDark,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("gemini_online_stt_disclosure")
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Gemini Online STT အသုံးပြုနေသည်",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "သင့်အသံကို စာသားပြောင်းရန် Google ဆာဗာသို့ ပို့ပေးပါမည်။ အင်တာနက်နှင့် Settings တွင် ထည့်ထားသော Gemini API key လိုအပ်ပါသည်။ API key မရှိပါက သို့မဟုတ် ချိတ်ဆက်၍ မရပါက အမှားအကြောင်းရင်းကို အတိအကျပြပြီး System ASR သို့ အလိုအလျောက် ပြောင်းပေးပါမည်။",
+                            fontSize = 11.sp,
+                            color = AngelTextSecondary
+                        )
                     }
                 }
             }

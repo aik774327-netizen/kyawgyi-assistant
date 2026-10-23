@@ -126,6 +126,29 @@ class SttEngineManager(
 
     val systemEngine = SystemOnDeviceSttEngine(context)
 
+    private val geminiApiService = com.example.data.GeminiApiService(context)
+
+    /** Test seam (same pattern as ErrorLearningWorkflowEngine's
+     * ttsProbeFactoryForTesting): replaces the live Gemini transcription
+     * call so manager-level online-STT behavior is unit-testable with
+     * fakes. Production code never sets this. */
+    @Volatile
+    internal var transcribeAudioOverrideForTesting: (suspend (ByteArray, String) -> String)? = null
+
+    /**
+     * §7 (2026-10-23): the Gemini online STT engine. Its transcripts
+     * enter through the same listener as the system engine's (wired in
+     * init), and its failures surface via [onOnlineEngineError] —
+     * classified message in uiState + failover to the system engine.
+     */
+    val onlineEngine = GeminiOnlineSttEngine(
+        transcribe = { wavBytes, languageTag ->
+            transcribeAudioOverrideForTesting?.invoke(wavBytes, languageTag)
+                ?: geminiApiService.transcribeAudio(wavBytes, languageTag)
+        },
+        onError = { message -> onOnlineEngineError(message) }
+    )
+
     @Volatile
     var activeEngine: SttEngine? = null
         private set
@@ -161,9 +184,11 @@ class SttEngineManager(
     init {
         telephonyPreemptionManager.registerCallStateListener()
 
-        // The Android system recognizer is the only real STT engine in this app.
-        // (The Sherpa-ONNX/Vosk tiers and their placeholder models were removed
-        // in the 2026-10-22 fake-data removal pass.)
+        // Default engine: the Android system recognizer. (The Sherpa-ONNX/
+        // Vosk tiers and their placeholder models were removed in the
+        // 2026-10-22 fake-data removal pass.) Since §7 (2026-10-23) the
+        // Gemini online engine is a second real engine; the persisted
+        // VoiceSettings selection below may replace this default.
         activeEngine = systemEngine
 
         // Populate Myanmar cities, townships, honorifics & contacts into HotwordBiasing
@@ -186,13 +211,33 @@ class SttEngineManager(
 
         // Wire engine transcript callbacks to thread-safe StateFlow updater
         systemEngine.setTranscriptListener { text, isFinal -> onEngineTranscriptReceived(text, isFinal) }
+        onlineEngine.setTranscriptListener { text, isFinal -> onEngineTranscriptReceived(text, isFinal) }
+
+        // Honor the persisted user selection (VoiceSettings) so the
+        // Settings choice actually drives this path; default remains
+        // the system recognizer.
+        val preferredType = try {
+            VoiceSettings.getInstance(context).preferredSttEngine
+        } catch (e: Exception) {
+            SttEngineType.SYSTEM_ON_DEVICE
+        }
+        if (preferredType == SttEngineType.GEMINI_ONLINE) {
+            activeEngine = onlineEngine
+        }
 
         syncUiStateWithActiveEngine()
     }
 
     private fun syncUiStateWithActiveEngine() {
         val currentType = activeEngine?.engineType ?: SttEngineType.SYSTEM_ON_DEVICE
-        val modelReady = systemEngine.isRecognitionAvailable()
+        // For the online engine there is no on-device model to load:
+        // readiness is per-call (key + network) and failures surface
+        // per utterance, so "model loaded" means "no local model
+        // required" rather than claiming a check we did not run.
+        val modelReady = when (currentType) {
+            SttEngineType.GEMINI_ONLINE -> true
+            SttEngineType.SYSTEM_ON_DEVICE -> systemEngine.isRecognitionAvailable()
+        }
         _uiState.update { current ->
             current.copy(
                 activeEngineType = currentType,
@@ -207,8 +252,10 @@ class SttEngineManager(
             val old = activeEngine
             old?.stopListening()
 
-            // SYSTEM_ON_DEVICE is the only engine type that exists.
-            activeEngine = systemEngine
+            activeEngine = when (type) {
+                SttEngineType.SYSTEM_ON_DEVICE -> systemEngine
+                SttEngineType.GEMINI_ONLINE -> onlineEngine
+            }
             Log.i(TAG, "Switched active STT Engine to: ${activeEngine?.engineType}")
             syncUiStateWithActiveEngine()
         }
@@ -225,12 +272,14 @@ class SttEngineManager(
         )
         Log.i(TAG, "SttEngineManager starting listening session (active=${activeEngine?.engineType})...")
         setEngineStateThreadSafe(SttEngineState.LISTENING)
+        // Exactly ONE engine runs per session. The former defensive
+        // co-activation of the system recognizer beside a non-system
+        // active engine is removed: with a real second engine
+        // (GEMINI_ONLINE) it would double-capture the microphone
+        // (a FIX-06 single-owner violation) and double-report
+        // transcripts. Failover, not co-activation, is the recovery
+        // path (recordEngineFailureAndFailover).
         activeEngine?.startListening()
-        // Defensive: if the active engine were ever not the system engine,
-        // co-activate it so live microphone speech still produces real transcripts.
-        if (activeEngine != systemEngine && systemEngine.isRecognitionAvailable()) {
-            systemEngine.startListening()
-        }
         syncUiStateWithActiveEngine()
     }
 
@@ -241,9 +290,6 @@ class SttEngineManager(
         )
         Log.i(TAG, "SttEngineManager stopping listening session.")
         activeEngine?.stopListening()
-        if (activeEngine != systemEngine) {
-            systemEngine.stopListening()
-        }
         setEngineStateThreadSafe(SttEngineState.IDLE)
         _uiState.update { current ->
             current.copy(
@@ -568,18 +614,35 @@ class SttEngineManager(
     }
 
     /**
-     * Ensures the active engine is the Android system recognizer — the only
-     * real STT engine in this app (the Sherpa-ONNX/Vosk tiers were removed).
+     * Ensures a usable engine is selected WITHOUT overriding the
+     * user's choice: the selection stands unless the selected engine
+     * is the online engine AND [FailureMemory] has it quarantined
+     * after repeated failures — then the system recognizer takes over.
+     * (Before §7 this forced SYSTEM_ON_DEVICE unconditionally, which
+     * was correct only while no other real engine existed.)
      */
     @Synchronized
     fun ensureHealthyEngineSelected(): SttEngineType {
-        if (activeEngine?.engineType != SttEngineType.SYSTEM_ON_DEVICE) {
+        val current = activeEngine?.engineType ?: SttEngineType.SYSTEM_ON_DEVICE
+        if (current == SttEngineType.GEMINI_ONLINE &&
+            !failureMemory.isEngineHealthy(current.name, System.currentTimeMillis())
+        ) {
             selectEngine(SttEngineType.SYSTEM_ON_DEVICE)
+            return SttEngineType.SYSTEM_ON_DEVICE
         }
-        return SttEngineType.SYSTEM_ON_DEVICE
+        return current
     }
 
     fun finalizeCurrentUtterance() {
+        // §7: for the online engine the VAD endpoint IS the utterance
+        // boundary — flush the buffered PCM to Gemini. The transcript
+        // re-enters asynchronously via the engine listener ->
+        // onEngineTranscriptReceived, the same entry the system
+        // recognizer's finals use.
+        val engine = activeEngine
+        if (engine is GeminiOnlineSttEngine && engine.finishUtterance()) {
+            return
+        }
         val transcriptToFinalize = lastPartialTranscript.trim()
         if (transcriptToFinalize.isNotBlank()) {
             Log.i(TAG, "VAD Endpoint triggered: Committing active transcript -> \"$transcriptToFinalize\"")
@@ -647,11 +710,37 @@ class SttEngineManager(
         }
     }
 
+    /**
+     * §7: a Gemini online STT failure (already classified into an
+     * honest Burmese message by the service layer) is surfaced in
+     * uiState AND fails over to the system recognizer for subsequent
+     * utterances — the failure is never hidden and the online engine
+     * is never silently retried in a loop.
+     */
+    private fun onOnlineEngineError(message: String) {
+        Log.w(TAG, "Gemini online STT failed: $message")
+        if (activeEngine?.engineType == SttEngineType.GEMINI_ONLINE) {
+            // Still the active engine: record + fail over (this also
+            // publishes the message as uiState.lastErrorMessage).
+            recordEngineFailureAndFailover(message)
+        } else {
+            // The user already switched engines manually; surface the
+            // failure without recording it against the wrong engine.
+            _uiState.update { current ->
+                current.copy(
+                    lastErrorMessage = message,
+                    lastUpdatedTimestampMs = System.currentTimeMillis()
+                )
+            }
+        }
+    }
+
     fun release() {
         isCaptureStreamingActive.set(false)
         captureStreamJob?.cancel()
         captureStreamJob = null
         stopListening()
         systemEngine.release()
+        onlineEngine.release()
     }
 }
