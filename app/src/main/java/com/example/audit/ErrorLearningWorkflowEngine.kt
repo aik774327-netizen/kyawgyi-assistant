@@ -1326,9 +1326,14 @@ object ErrorLearningWorkflowEngine {
             ErrorTaxonomy.NETWORK_REALITY_ERROR ->
                 "Verified active network validation showing internet reachability."
             ErrorTaxonomy.RESOURCE_UNAVAILABLE_ERROR ->
-                "Verified file/package existence check on device storage."
+                "Verified existence check for the recorded resource kind (TTS voice / package / model file) on this device."
             else ->
-                "Verified state change or configuration update resolving the technical cause."
+                // ISSUE-040: honest clearance story — this error type has NO
+                // automatic live re-check, and the UI must say so instead of
+                // describing a check that does not exist. A manual retry is
+                // recorded as RETRY_ATTEMPTED (ISSUE-038); only a verified
+                // successful retry (ISSUE-034 typed result) clears the record.
+                "This error type has no automatic live re-check. Retry the action manually; a verified successful retry clears this record."
         }
     }
 }
