@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
 import com.example.security.api.ApiKeyQuotaManager
@@ -49,6 +50,25 @@ class GeminiApiService(
     companion object {
         private const val TAG = "GeminiApiService"
         private const val MODEL_NAME = "gemini-3.5-flash"
+
+        /**
+         * Gemini TTS model (2026-10-23, §7 plan). The id follows the
+         * `…-preview-tts` family named in the inspection report; its
+         * currency against Google's live catalog is NOT VERIFIED —
+         * if Google renames it, synthesizeSpeech fails with an
+         * ENDPOINT (404) classification, never a fake success.
+         */
+        const val TTS_MODEL_NAME = "gemini-2.5-flash-preview-tts"
+
+        /** Default prebuilt Gemini TTS voice for Burmese replies. */
+        const val DEFAULT_TTS_VOICE_NAME = "Kore"
+
+        /** Gemini TTS returns raw L16 PCM at 24 kHz, mono, no WAV header. */
+        const val TTS_OUTPUT_SAMPLE_RATE_HZ = 24_000
+
+        private const val TRANSCRIPTION_INSTRUCTION =
+            "Transcribe the speech in this audio verbatim. Return ONLY the transcript text — " +
+                "no commentary, no labels, no quotation marks, no translation."
         const val GEMINI_QUOTA_ERROR_MESSAGE = "Gemini API Quota ပြည့်သွားပါသဖြင့် ခေတ္တစောင့်ဆိုင်းပါ သို့မဟုတ် ကိုယ်ပိုင် API Key ထည့်ပါ"
         const val NO_API_KEY_MESSAGE = "API key မထည့်ရသေးပါ — Settings မှာ Gemini API Key ထည့်ပါ"
         const val CONNECTION_ERROR_MESSAGE = "Gemini ချိတ်ဆက်၍ မရပါ — API key ထည့်ထားခြင်း ရှိမရှိနဲ့ internet ကို စစ်ပါ"
@@ -351,5 +371,213 @@ class GeminiApiService(
             val failureClass = GeminiFailureClassifier.classify(e)
             Pair(false, GeminiFailureClassifier.userMessageFor(failureClass))
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Online STT / TTS (2026-10-23, §7 plan of the Gemini online
+    // STT/TTS inspection). Unlike generateResponse — which converts
+    // failures into a Pair for the chat UI — these methods THROW the
+    // typed failures (NoApiKeyConfiguredException,
+    // GeminiQuotaExceededException, GeminiHttpException,
+    // GeminiEmptyResponseException, IOException) so the voice engines
+    // can classify them via GeminiFailureClassifier and fall back
+    // honestly. All calls run through the shared key pool
+    // (ApiKeyQuotaManager.executeWithRetry) and the injectable
+    // httpClient, exactly like the chat path. The API key is never
+    // logged and never embedded in an exception message.
+    // ------------------------------------------------------------------
+
+    /**
+     * Transcribes a complete WAV utterance with Gemini audio
+     * understanding and returns the transcript text only.
+     *
+     * @param wavBytes a complete WAV file (16 kHz mono PCM16 in
+     * production use; the bytes are sent as an `audio/wav` inlineData
+     * part, so the container must be self-describing).
+     * @param languageTag expected speech language (e.g. "my-MM"),
+     * sent as a transcription hint.
+     * @throws NoApiKeyConfiguredException when no key is configured
+     * @throws GeminiQuotaExceededException on HTTP 429 / pool cooldown
+     * @throws GeminiHttpException on other non-2xx responses
+     * @throws GeminiEmptyResponseException on a 200 with no transcript
+     */
+    suspend fun transcribeAudio(wavBytes: ByteArray, languageTag: String): String =
+        withContext(Dispatchers.IO) {
+            require(wavBytes.isNotEmpty()) { "transcribeAudio requires non-empty WAV bytes" }
+            executeAudioWithKeyPool("Gemini Audio Transcription") { apiKey ->
+                executeTranscriptionRequest(apiKey, wavBytes, languageTag)
+            }
+        }
+
+    /**
+     * Synthesizes speech with the Gemini TTS model and returns the
+     * raw PCM16 audio (24 kHz mono, NO WAV header — see
+     * [TTS_OUTPUT_SAMPLE_RATE_HZ]).
+     *
+     * @throws NoApiKeyConfiguredException when no key is configured
+     * @throws GeminiQuotaExceededException on HTTP 429 / pool cooldown
+     * @throws GeminiHttpException on other non-2xx responses
+     * @throws GeminiEmptyResponseException on a 200 with no audio part
+     */
+    suspend fun synthesizeSpeech(
+        text: String,
+        voiceName: String = DEFAULT_TTS_VOICE_NAME
+    ): ByteArray = withContext(Dispatchers.IO) {
+        require(text.isNotBlank()) { "synthesizeSpeech requires non-blank text" }
+        executeAudioWithKeyPool("Gemini Speech Synthesis") { apiKey ->
+            executeSynthesisRequest(apiKey, text, voiceName)
+        }
+    }
+
+    /**
+     * Runs [block] with a pooled API key (same pool/cooldown/rotation
+     * as chat), or with the screened BuildConfig key when the quota
+     * manager is uninitialized. Throws [NoApiKeyConfiguredException]
+     * when no key exists at all — an audio call must never silently
+     * pretend to have run.
+     */
+    private suspend fun <T> executeAudioWithKeyPool(
+        operationName: String,
+        block: (apiKey: String) -> T
+    ): T {
+        val quotaManager = context?.let { ApiKeyQuotaManager.getInstance(it) }
+            ?: ApiKeyQuotaManager.getInstance(null)
+        if (quotaManager != null) {
+            return quotaManager.executeWithRetry(
+                operationName = operationName,
+                maxRetries = 3
+            ) { activeApiKey -> block(activeApiKey) }
+        }
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        val cleanApiKey = if (apiKey != "MY_GEMINI_API_KEY" && apiKey.isNotBlank()) apiKey else null
+            ?: throw NoApiKeyConfiguredException()
+        return block(cleanApiKey)
+    }
+
+    private fun executeTranscriptionRequest(
+        apiKey: String,
+        wavBytes: ByteArray,
+        languageTag: String
+    ): String {
+        val audioPart = JSONObject()
+        val inlineData = JSONObject()
+        inlineData.put("mimeType", "audio/wav")
+        inlineData.put("data", Base64.encodeToString(wavBytes, Base64.NO_WRAP))
+        audioPart.put("inlineData", inlineData)
+
+        val instructionPart = JSONObject()
+        instructionPart.put(
+            "text",
+            "$TRANSCRIPTION_INSTRUCTION Expected language: $languageTag."
+        )
+
+        val parts = JSONArray()
+        parts.put(audioPart)
+        parts.put(instructionPart)
+
+        val msgObj = JSONObject()
+        msgObj.put("role", "user")
+        msgObj.put("parts", parts)
+
+        val contentsArr = JSONArray()
+        contentsArr.put(msgObj)
+
+        val rootObj = JSONObject()
+        rootObj.put("contents", contentsArr)
+
+        val jsonResp = postGenerateContent(MODEL_NAME, apiKey, rootObj)
+        // Defensive: scan every part for the first usable text — the
+        // model may interleave non-text parts.
+        val partsArr = firstCandidateParts(jsonResp)
+        if (partsArr != null) {
+            for (i in 0 until partsArr.length()) {
+                val text = partsArr.getJSONObject(i).optString("text", "")
+                if (text.isNotBlank()) return text.trim()
+            }
+        }
+        throw GeminiEmptyResponseException("Gemini transcription returned no text")
+    }
+
+    private fun executeSynthesisRequest(
+        apiKey: String,
+        text: String,
+        voiceName: String
+    ): ByteArray {
+        val textPart = JSONObject()
+        textPart.put("text", text)
+        val parts = JSONArray()
+        parts.put(textPart)
+        val msgObj = JSONObject()
+        msgObj.put("parts", parts)
+        val contentsArr = JSONArray()
+        contentsArr.put(msgObj)
+
+        val voiceConfig = JSONObject()
+        val prebuilt = JSONObject()
+        prebuilt.put("voiceName", voiceName)
+        voiceConfig.put("prebuiltVoiceConfig", prebuilt)
+        val speechConfig = JSONObject()
+        speechConfig.put("voiceConfig", voiceConfig)
+        val generationConfig = JSONObject()
+        val modalities = JSONArray()
+        modalities.put("AUDIO")
+        generationConfig.put("responseModalities", modalities)
+        generationConfig.put("speechConfig", speechConfig)
+
+        val rootObj = JSONObject()
+        rootObj.put("contents", contentsArr)
+        rootObj.put("generationConfig", generationConfig)
+
+        val jsonResp = postGenerateContent(TTS_MODEL_NAME, apiKey, rootObj)
+        val partsArr = firstCandidateParts(jsonResp)
+        if (partsArr != null) {
+            for (i in 0 until partsArr.length()) {
+                val data = partsArr.getJSONObject(i)
+                    .optJSONObject("inlineData")
+                    ?.optString("data", "")
+                if (!data.isNullOrBlank()) {
+                    val pcm = Base64.decode(data, Base64.DEFAULT)
+                    if (pcm.isNotEmpty()) return pcm
+                }
+            }
+        }
+        throw GeminiEmptyResponseException("Gemini speech synthesis returned no audio part")
+    }
+
+    /**
+     * POSTs a generateContent request for [model] and returns the
+     * parsed JSON body. Error mapping matches the chat path: HTTP 429
+     * (or a quota body) → [GeminiQuotaExceededException]; any other
+     * non-2xx → [GeminiHttpException] carrying ONLY the status code.
+     */
+    private fun postGenerateContent(model: String, apiKey: String, rootObj: JSONObject): JSONObject {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+        val httpRequest = Request.Builder()
+            .url(url)
+            .post(rootObj.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(httpRequest).execute()
+        val responseCode = response.code
+        val responseString = response.body?.string() ?: ""
+
+        if (responseCode == 429 || responseString.contains("RESOURCE_EXHAUSTED", ignoreCase = true)) {
+            Log.w(TAG, "Gemini API 429 Quota Exhausted detected for model $model")
+            throw GeminiQuotaExceededException("HTTP 429 RESOURCE_EXHAUSTED: Rate limit or quota exhausted ($responseCode)")
+        }
+        if (!response.isSuccessful) {
+            Log.w(TAG, "Gemini API call unsuccessful for model $model (HTTP $responseCode)")
+            throw GeminiHttpException(responseCode)
+        }
+        if (responseString.isBlank()) {
+            throw GeminiEmptyResponseException("Gemini returned an empty body for model $model")
+        }
+        return JSONObject(responseString)
+    }
+
+    private fun firstCandidateParts(jsonResp: JSONObject): JSONArray? {
+        val candidates = jsonResp.optJSONArray("candidates") ?: return null
+        if (candidates.length() == 0) return null
+        return candidates.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
     }
 }

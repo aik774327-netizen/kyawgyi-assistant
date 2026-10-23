@@ -28,6 +28,19 @@ import java.net.UnknownHostException
 /** An HTTP-level Gemini failure, carrying ONLY the status code. */
 class GeminiHttpException(val code: Int) : IOException("Gemini HTTP $code")
 
+/**
+ * Gemini returned HTTP 200 but no usable payload (no transcript text
+ * for an STT call, no audio part for a TTS call). Distinct from a
+ * transport failure: the request WAS accepted, the reply was empty.
+ * (The chat path historically threw a plain IOException with this
+ * meaning; the audio methods added 2026-10-23 throw this typed form
+ * so [GeminiFailureClassifier] can map it to
+ * [GeminiFailureClass.EMPTY_RESPONSE].)
+ */
+class GeminiEmptyResponseException(
+    message: String = "Gemini returned an empty response"
+) : IOException(message)
+
 enum class GeminiFailureClass {
     /** HTTP 400/401/403 — key rejected, API not enabled, restricted. */
     AUTH,
@@ -64,6 +77,7 @@ object GeminiFailureClassifier {
         while (current != null) {
             when (current) {
                 is GeminiHttpException -> return classifyHttpCode(current.code)
+                is GeminiEmptyResponseException -> return GeminiFailureClass.EMPTY_RESPONSE
                 is SocketTimeoutException -> return GeminiFailureClass.NETWORK_TIMEOUT
                 is UnknownHostException, is ConnectException, is NoRouteToHostException ->
                     return GeminiFailureClass.NETWORK_UNREACHABLE
@@ -71,6 +85,29 @@ object GeminiFailureClassifier {
             current = current.cause
         }
         return GeminiFailureClass.UNKNOWN
+    }
+
+    /**
+     * Maps ANY throwable from a Gemini call to the single honest
+     * Burmese user message for its class. Used by the online STT/TTS
+     * engines (2026-10-23), which receive typed failures from
+     * [GeminiApiService] instead of the chat path's Pair result:
+     * no-key and quota keep their dedicated messages, HTTP failures
+     * classify by status code, network failures by exception type.
+     * Never includes the API key or a raw response body.
+     */
+    fun userMessageForThrowable(e: Throwable): String {
+        if (GeminiApiService.isNoApiKeyException(e)) {
+            return userMessageFor(GeminiFailureClass.NO_KEY)
+        }
+        if (GeminiApiService.isQuotaOrRateLimitException(e)) {
+            return userMessageFor(GeminiFailureClass.QUOTA)
+        }
+        val failureClass = classify(e)
+        val httpCode = generateSequence(e) { it.cause }
+            .filterIsInstance<GeminiHttpException>()
+            .firstOrNull()?.code
+        return userMessageFor(failureClass, httpCode)
     }
 
     /** One honest, class-specific Burmese user message per failure class. */
