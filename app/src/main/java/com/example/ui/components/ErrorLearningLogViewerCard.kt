@@ -236,7 +236,10 @@ fun ErrorLearningLogViewerCard(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
-                blockedMethods.entries.take(2).forEach { (cmdKey, logEntry) ->
+                // ISSUE-046: render EVERY blocked method. This list was
+                // silently truncated with .take(2), so with 3+ blocked
+                // methods the user could not even see the rest were blocked.
+                blockedMethods.entries.forEach { (cmdKey, logEntry) ->
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = Color(0xFFEF4444).copy(alpha = 0.12f),
