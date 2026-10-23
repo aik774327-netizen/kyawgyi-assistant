@@ -86,77 +86,6 @@ class MyanmarTTSEngine(
                 .trim()
         }
 
-        /**
-         * Universal Burmese-to-Phonetic Latin Transliterator (G2P Fallback).
-         * Converts Myanmar Unicode phrases and syllables into natural phonetic pronunciation
-         * so standard TTS engines (e.g. com.google.android.tts with en-US) can vocalize Burmese
-         * clearly even when the optional my-MM voice pack is not yet downloaded.
-         */
-        fun transliterateBurmeseToSpeakablePhonetics(text: String): String {
-            if (text.isBlank()) return ""
-
-            val phraseLexicon = linkedMapOf(
-                "မင်္ဂလာပါခင်ဗျာ" to "mingalarpar khin-byar",
-                "မင်္ဂလာပါ" to "mingalarpar",
-                "ဟုတ်ကဲ့" to "hote-kae",
-                "ဖွင့်ပေးလိုက်ပါပြီနော်" to "phwint pay lite par pyi naw",
-                "ဖွင့်ပေးလိုက်ပါပြီ" to "phwint pay lite par pyi",
-                "ပိတ်ပေးလိုက်ပါပြီ" to "pate pay lite par pyi",
-                "ဆောင်ရွက်ပေးလိုက်ပါပြီ" to "saung ywet pay lite par pyi",
-                "အသံတိုးပေးလိုက်ပါပြီ" to "a-than toe pay lite par pyi",
-                "အသံလျှော့ပေးလိုက်ပါပြီ" to "a-than shaw pay lite par pyi",
-                "ဓာတ်မီး" to "dat-mee",
-                "ဝိုင်ဖိုင်" to "wai-fai",
-                "ဘလူးတူးသ်" to "blue-tooth",
-                "ဖုန်းခေါ်" to "phone khaw",
-                "မက်ဆေ့ခ်ျ" to "message",
-                "ကျော်ကြီး" to "Kyaw Gyi",
-                "ခင်ဗျာ" to "khin-byar",
-                "နော်" to "naw",
-                "ပါပြီ" to "par pyi",
-                "ပါတယ်" to "par tae",
-                "မရသေးပါ" to "ma ya thay par",
-                "အဆင်သင့်ရှိပါသည်" to "a-sin-thint shi par thee",
-                "ကျေးဇူးတင်ပါတယ်" to "kyay-zoo tin par tae"
-            )
-
-            var result = text
-                .replace("။", ". ")
-                .replace("၊", ", ")
-
-            for ((mm, phonetic) in phraseLexicon) {
-                result = result.replace(mm, " $phonetic ")
-            }
-
-            val consonantMap = mapOf(
-                'က' to "ka", 'ခ' to "kha", 'ဂ' to "ga", 'ဃ' to "gha", 'င' to "nga",
-                'စ' to "sa", 'ဆ' to "hsa", 'ဇ' to "za", 'ဈ' to "zha", 'ဉ' to "nya", 'ည' to "nya",
-                'ဋ' to "ta", 'ဌ' to "hta", 'ဍ' to "da", 'ဎ' to "dha", 'ဏ' to "na",
-                'တ' to "ta", 'ထ' to "hta", 'ဒ' to "da", 'ဓ' to "dha", 'န' to "na",
-                'ပ' to "pa", 'ဖ' to "pha", 'ဗ' to "ba", 'ဘ' to "bha", 'မ' to "ma",
-                'ယ' to "ya", 'ရ' to "ya", 'လ' to "la", 'ဝ' to "wa", 'သ' to "tha",
-                'ဟ' to "ha", 'ဠ' to "la", 'အ' to "a"
-            )
-
-            val vowelMap = mapOf(
-                'ာ' to "ar", 'ါ' to "ar", 'ိ' to "i", 'ီ' to "ee",
-                'ု' to "u", 'ူ' to "oo", 'ေ' to "ay", 'ဲ' to "ae",
-                'ံ' to "an", '့' to "", 'း' to "", '်' to ""
-            )
-
-            val sb = StringBuilder()
-            for (ch in result) {
-                when {
-                    consonantMap.containsKey(ch) -> sb.append(consonantMap[ch]).append(" ")
-                    vowelMap.containsKey(ch) -> sb.append(vowelMap[ch])
-                    ch.code in 0x1040..0x1049 -> sb.append((ch.code - 0x1040).toString())
-                    ch.code in 0x1000..0x109F -> sb.append(" ")
-                    else -> sb.append(ch)
-                }
-            }
-
-            return sb.toString().replace(Regex("\\s+"), " ").trim()
-        }
     }
 
     private var tts: TextToSpeech? = null
@@ -318,12 +247,13 @@ class MyanmarTTSEngine(
         }
 
         // FIX-02 (device defect B2 — robotic Burmese voice): the old
-        // "Universal Phonetic G2P Fallback" transliterated Burmese into
-        // Latin phonetics and read it with a US English voice whenever
-        // the my-MM voice data was missing. That is exactly the robotic
-        // voice the user reported, and it dishonestly presented itself
-        // as a Burmese reply. It is REMOVED. When no installed Myanmar
-        // voice exists, the user now hears one honest English notice
+        // phonetic fallback transliterated Burmese into Latin phonetics
+        // and read it with a US English voice whenever the my-MM voice
+        // data was missing. That is exactly the robotic voice the user
+        // reported, and it dishonestly presented itself as a Burmese
+        // reply. It is REMOVED (the dead transliterator itself was
+        // deleted under ISSUE-045). When no installed Myanmar voice
+        // exists, the user now hears one honest English notice
         // (plus the recovery Toast/event with install guidance) — the
         // Burmese text itself is never fed to a foreign voice.
         val voicePackManager = MyanmarTTSVoicePackManager.getInstance(context)

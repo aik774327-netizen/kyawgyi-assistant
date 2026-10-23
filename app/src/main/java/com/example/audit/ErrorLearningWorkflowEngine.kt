@@ -1279,7 +1279,7 @@ object ErrorLearningWorkflowEngine {
             lowerEvidence.contains("voicepackstatus") || lowerEvidence.contains("tts_synthesis") || lowerEvidence.contains("com.google.android.tts") -> ThreeFactorAnalysis(
                 technicalCause = "TextToSpeech.isLanguageAvailable(my-MM) returned LANG_NOT_SUPPORTED / LANG_MISSING_DATA on com.google.android.tts.",
                 resourceLimitation = "Offline Burmese (my-MM) neural voice data pack is not yet downloaded inside Google Speech Services on this device.",
-                realWorldMismatch = "Raw Myanmar Unicode requires either the native my-MM voice pack or Universal Burmese Phonetic G2P Fallback to vocalize on standard Android TTS engines."
+                realWorldMismatch = "Raw Myanmar Unicode can only be vocalized by the native my-MM voice pack on standard Android TTS engines. There is no phonetic substitute: when the voice data is missing, the app reports that honestly instead of feeding Burmese text to a foreign voice."
             )
             lowerEvidence.contains("not installed") || lowerEvidence.contains("activitynotfound") || lowerEvidence.contains("missing") -> ThreeFactorAnalysis(
                 technicalCause = "PackageManager / file lookup returned null for the requested target.",
